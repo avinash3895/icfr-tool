@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ICFR Control Repository | Sanad Group</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Georgia, serif; background: #f4f2ec; color: #26241e; }
+    #root { min-height: 100vh; }
+    .login-wrap { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .login-card { background:#fffdf7; border:1px solid #ded7c4; padding:36px 32px; width:360px; box-shadow:4px 4px 0 rgba(38,36,30,.1); }
+    .login-card h1 { font-size:18px; font-weight:600; margin-bottom:4px; }
+    .login-card p  { font-size:12px; color:#8a8472; font-family:monospace; margin-bottom:24px; }
+    .field { margin-bottom:14px; }
+    .field label { display:block; font-family:monospace; font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:#8a8472; margin-bottom:4px; }
+    .field input  { width:100%; border:1px solid #c8bfa6; padding:8px 10px; font-size:13px; background:#f4f2ec; font-family:monospace; }
+    .field input:focus { outline:2px solid #3b6d11; }
+    .err  { font-size:12px; color:#a32d2d; margin-bottom:10px; font-family:monospace; }
+    .btn-login { width:100%; background:#26241e; color:#f4f2ec; border:none; padding:10px; font-family:monospace; font-size:13px; cursor:pointer; }
+    .btn-login:hover { background:#3a3830; }
+    .btn-login:disabled { opacity:.5; cursor:not-allowed; }
+    .loader { display:flex; align-items:center; justify-content:center; height:100vh; font-family:monospace; font-size:12px; color:#8a8472; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const SUPABASE_URL  = "https://cfqxeuedcbscnupgqxxw.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmcXhldWVkY2JzY251cGdxeHh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2NzEyMTIsImV4cCI6MjA5NjI0NzIxMn0.D_B7n6tQwI67Knjl_wdBpwyao0r1ZciwzblcZ7AgBbg";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+/* ── LOGIN PAGE ── */
+const LoginPage = ({ onLogin }) => {
+  const [email, setEmail]     = useState("");
+  const [pass,  setPass]      = useState("");
+  const [err,   setErr]       = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    setErr(""); setLoading(true);
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+    if (error) { setErr(error.message); setLoading(false); return; }
+    const { data: profile } = await sb.from("profiles").select("*").eq("id", data.user.id).single();
+    onLogin(data.user, profile);
+    setLoading(false);
+  };
+
+  return (
+    <div className="login-wrap">
+      <div className="login-card">
+        <h1>ICFR Control Repository</h1>
+        <p>Sanad Group · Internal Controls</p>
+        <div className="field">
+          <label>Email</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="your@email.com"/>
+        </div>
+        <div className="field">
+          <label>Password</label>
+          <input type="password" value={pass} onChange={e => setPass(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="••••••••"/>
+        </div>
+        {err && <div className="err">{err}</div>}
+        <button className="btn-login" onClick={handleLogin} disabled={loading}>
+          {loading ? "Signing in…" : "Sign In →"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ── SHELL ── */
+const App = () => {
+  const [user,    setUser]    = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [appReady, setAppReady] = useState(false);
+  const [status,  setStatus]  = useState("checking");
+
+  /* check existing session */
+  useEffect(() => {
+    sb.auth.getSession().then(async ({ data }) => {
+      if (data.session) {
+        const { data: p } = await sb.from("profiles").select("*").eq("id", data.session.user.id).single();
+        setUser(data.session.user);
+        setProfile(p);
+        await loadApp(data.session.user, p);
+      } else {
+        setStatus("login");
+      }
+    });
+  }, []);
+
+  /* load full app JS from Supabase storage after login */
+  const loadApp = async (u, p) => {
+    setStatus("loading");
+    try {
+      /* fetch app.js from icfr-app bucket — cache busted every deploy */
+      const url = `${SUPABASE_URL}/functions/v1/icfr-app?t=${Date.now()}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("App bundle not found");
+      const code = await res.text();
+      /* inject into page as a plain script, wrapped in an IIFE so its top-level
+         const/let declarations (sb, useState, etc.) don't collide with the shell's */
+      const script = document.createElement("script");
+      script.text = "(function(){\n" + code + "\n})();";
+      document.head.appendChild(script);
+      if (!window.ICFRApp) throw new Error("ICFRApp did not register");
+      setAppReady(true);
+      setStatus("ready");
+    } catch (err) {
+      setStatus("error:" + err.message);
+    }
+  };
+
+  const handleLogin = async (u, p) => {
+    setUser(u); setProfile(p);
+    await loadApp(u, p);
+  };
+
+  const handleSignOut = async () => {
+    await sb.auth.signOut();
+    setUser(null); setProfile(null); setAppReady(false); setStatus("login");
+  };
+
+  if (status === "checking") return <div className="loader">Loading…</div>;
+  if (status === "login")    return <LoginPage onLogin={handleLogin}/>;
+  if (status === "loading")  return <div className="loader">Loading app…</div>;
+  if (status.startsWith("error")) return <div className="loader" style={{color:"#a32d2d"}}>Error: {status.replace("error:","")}</div>;
+
+  /* once app.js loaded, render ICFRApp from global scope */
+  if (appReady && window.ICFRApp) {
+    return <window.ICFRApp user={user} profile={profile} onSignOut={handleSignOut}/>;
+  }
+  return <div className="loader">Initialising…</div>;
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
