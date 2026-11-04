@@ -2,7 +2,7 @@
 //   safe  -> runs automatically
 //   risky -> the task waits for the owner's Approve / Reject (sending email, deleting, editing existing items, sharing, money)
 import { admin, cfg, clip, getSettings, prettyTime, uniq, nowLocal, SUPABASE_URL } from "./sa.ts";
-import { orKey } from "./llm.ts";
+import { openrouterOnlyKey } from "./llm.ts";
 
 export type ToolCtx = { userId: string; task: any; settings: any; chatId: string | null; deadline: number; isBoss: boolean };
 type Tool = {
@@ -76,7 +76,7 @@ async function searchGemini(q: string): Promise<Hit[]> {
 }
 // OpenRouter's built-in web search (billed to the owner's OpenRouter credits, a few cents per search).
 async function searchOpenRouter(q: string, n: number, userId: string, model: string): Promise<Hit[]> {
-  const key = await orKey(userId);
+  const key = await openrouterOnlyKey(userId);
   if (!key) throw new Error("no OpenRouter key");
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",

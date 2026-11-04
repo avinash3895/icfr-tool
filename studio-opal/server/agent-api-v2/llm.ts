@@ -10,7 +10,8 @@ export class SoftFail extends Error {}
 export class NoTools extends Error {}
 export class TimeUp extends Error {}
 
-export async function orKey(userId: string): Promise<string> {
+// The OpenRouter key alone (used by OpenRouter-only extras such as its web search plugin).
+export async function openrouterOnlyKey(userId: string): Promise<string> {
   const { data } = await admin.from("agent_user_keys").select("openrouter_key").eq("user_id", userId).maybeSingle();
   const k = String((data as any)?.openrouter_key || "");
   if (k) return k;
@@ -19,22 +20,52 @@ export async function orKey(userId: string): Promise<string> {
   return "";
 }
 
+// The key the Super Agent talks to models with. When the user picked another provider in Settings
+// (any OpenAI-compatible API: OpenAI, Gemini, Claude, Groq...), the endpoint travels inside the key string
+// ("ep1:" + base64 JSON), so every existing caller keeps working unchanged.
+export async function orKey(userId: string): Promise<string> {
+  const { data: s } = await admin.from("sa_settings").select("llm_provider,llm_base_url,llm_key").eq("user_id", userId).maybeSingle();
+  const prov = String((s as any)?.llm_provider || "openrouter");
+  const url = String((s as any)?.llm_base_url || "").trim();
+  const key = String((s as any)?.llm_key || "").trim();
+  if (prov !== "openrouter" && url) return "ep1:" + btoa(JSON.stringify({ url, key, name: prov }));
+  if (prov === "openrouter" && key) return key;
+  return await openrouterOnlyKey(userId);
+}
+
+type Endpoint = { url: string; key: string; name: string; openrouter: boolean };
+function endpoint(key: string): Endpoint {
+  if (key.startsWith("ep1:")) {
+    try {
+      const e = JSON.parse(atob(key.slice(4)));
+      const base = String(e.url || "").replace(/\/+$/, "");
+      const url = /\/chat\/completions$/.test(base) ? base : `${base}/chat/completions`;
+      return { url, key: String(e.key || ""), name: String(e.name || "provider"), openrouter: /openrouter\.ai/i.test(base) };
+    } catch { /* fall through to OpenRouter */ }
+  }
+  return { url: OR, key, name: "OpenRouter", openrouter: true };
+}
+
 export type ChatOut = { message: any; text: string; model: string; finish: string };
 
 async function once(model: string, key: string, body: any, timeoutMs: number): Promise<ChatOut> {
   let r: Response;
   let t = "";
+  const ep = endpoint(key);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (ep.key) headers.Authorization = `Bearer ${ep.key}`;
+  if (ep.openrouter) { headers["HTTP-Referer"] = SUPABASE_URL; headers["X-Title"] = "Studio Super Agent"; }
   try {
-    r = await fetch(OR, {
+    r = await fetch(ep.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, "HTTP-Referer": SUPABASE_URL, "X-Title": "Studio Super Agent" },
+      headers,
       body: JSON.stringify({ ...body, model }),
       signal: AbortSignal.timeout(Math.max(5_000, timeoutMs)),
     });
     t = await r.text();
   } catch (e: any) {
     if (e?.name === "TimeoutError" || e?.name === "AbortError") throw new TimeUp(`${model} took too long`);
-    throw new LimitHit(`${model}: could not reach OpenRouter`);
+    throw new LimitHit(`${model}: could not reach ${ep.name}`);
   }
   const msg = `${model} ${r.status}: ${clip(t.replace(/\s+/g, " "), 240)}`;
   if (!r.ok) {
@@ -64,7 +95,7 @@ async function once(model: string, key: string, body: any, timeoutMs: number): P
 
 // Walks the model chain. A rate limit on every model raises LimitHit (the task pauses).
 export async function chat(o: { chain: string[]; key: string; messages: any[]; tools?: any[]; json?: boolean; maxTokens?: number; deadline: number; noToolsFor?: Set<string> }): Promise<ChatOut> {
-  if (!o.key) throw new SoftFail("No OpenRouter key is saved. Add it in Settings (Agent) first.");
+  if (!o.key) throw new SoftFail("No API key is saved for the Super Agent. Add one in Settings → Super Agent first.");
   let limit: Error | null = null;
   let soft: Error | null = null;
   const errs: string[] = [];

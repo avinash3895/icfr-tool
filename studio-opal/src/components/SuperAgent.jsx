@@ -138,7 +138,7 @@ function AgentEditor({ agent, groups, onSave, onDelete, onClose }) {
           ))}
         </div>
       </div>
-      <label className="sa-field">Model (optional, any OpenRouter id)<input value={f.model} onChange={(e) => up('model', e.target.value)} placeholder="Uses your Super Agent model when empty" /></label>
+      <label className="sa-field">Model (optional, a model id from your Super Agent provider)<input value={f.model} onChange={(e) => up('model', e.target.value)} placeholder="Uses your Super Agent model when empty" /></label>
       <div className="sa-field">Schedule (optional)
         <div className="sa-row wrap">
           <select value={f.schedule.mode} onChange={(e) => upS('mode', e.target.value)}>
@@ -185,8 +185,9 @@ function SettingsSheet({ s, onClose, onSaved }) {
   };
   return (
     <Sheet title="Super Agent settings" onClose={onClose}>
-      {!s.has_openrouter && <div className="sa-note bad">No OpenRouter key is saved. Add it in Settings → Agent first.</div>}
-      <label className="sa-field">Model (any OpenRouter model id)
+      {!s.has_openrouter && <div className="sa-note bad">No API key is saved for the Super Agent. Pick a provider and key in Settings → Super Agent.</div>}
+      <div className="sa-note">Provider: <strong>{s.llm_provider || 'openrouter'}</strong>. Change the provider, model and API key in Settings → Super Agent.</div>
+      <label className="sa-field">Model id
         <div className="sa-row"><input value={f.model} onChange={(e) => up('model', e.target.value)} placeholder="deepseek/deepseek-v4.1-flash" /><button className="sa-btn sm" onClick={test} disabled={testing || !f.model}>{testing ? '…' : 'Test'}</button></div>
       </label>
       <label className="sa-field">Fallback models (comma separated, tried when the first one is limited)<input value={f.fallbacks} onChange={(e) => up('fallbacks', e.target.value)} placeholder="google/gemma-4-31b-it:free" /></label>

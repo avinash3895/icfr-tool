@@ -4,7 +4,7 @@ import { REGIONS } from '../lib/config';
 import { createProject, freshToken, listOrgs, listProjects, setupProject, startOAuth, waitUntilReady } from '../lib/connect';
 import { errText } from '../lib/util';
 
-export default function Onboarding({ config, token, name, onConnected, initialError }) {
+export default function Onboarding({ config, token, name, onConnected, onCancel, initialError }) {
   const [error, setError] = useState(initialError || '');
   const [projects, setProjects] = useState(null);
   const [orgs, setOrgs] = useState([]);
@@ -58,18 +58,18 @@ export default function Onboarding({ config, token, name, onConnected, initialEr
   return (
     <div className='onboard'>
       <div className='onboard-card'>
-        <div className='brand'><Logo size={34} /><span style={{ color: '#0f2329' }}>Studio</span></div>
+        <div className='brand'><Logo size={34} /><span>Studio</span></div>
         {!token && (
           <>
-            <h1>Connect your database{name ? `, ${name}` : ''}</h1>
-            <p className='lead'>Studio keeps your chats, workflows and files in a Supabase project that belongs to you. You only do this once. After that it is saved with your account.</p>
+            <h1>Sync with Supabase{name ? `, ${name}` : ''}</h1>
+            <p className='lead'>Optional: keep your chats, workflows and files in a Supabase project that belongs to you, so they follow you to every device. You only do this once.</p>
             <ol className='steps'>
               <li><span className='n'>1</span><span>Tap Connect Supabase and log in. Create a free Supabase account first if you do not have one.</span></li>
               <li><span className='n'>2</span><span>Approve access, then pick a project or let Studio create a new one.</span></li>
               <li><span className='n'>3</span><span>Studio sets up everything. No code, no copying.</span></li>
             </ol>
             {error && <div className='banner error' style={{ margin: 0 }}>{error}</div>}
-            <button className='btn primary' style={{ minHeight: 48 }} disabled={!config?.oauthClientId} onClick={() => startOAuth(config.oauthClientId)}><Icon name='db' /> Connect Supabase</button>
+            <button className='btn primary' style={{ minHeight: 48 }} disabled={!config?.oauthClientId} onClick={() => config?.oauthClientId && startOAuth(config.oauthClientId)}><Icon name='db' /> Connect Supabase</button>
             {!config?.oauthClientId && <p className='hint'>Connecting is not switched on yet on the server.</p>}
           </>
         )}
@@ -111,6 +111,7 @@ export default function Onboarding({ config, token, name, onConnected, initialEr
             )}
           </>
         )}
+        {!busy && onCancel && <button className='btn ghost small' style={{ alignSelf: 'center' }} onClick={onCancel}>← Back to Studio (keep using this device)</button>}
         {busy && (
           <>
             <h1>Setting up your space</h1>

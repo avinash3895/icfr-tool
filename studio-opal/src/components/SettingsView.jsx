@@ -7,6 +7,7 @@ import { fmtCost, fmtTok, monthKey, summarize } from '../lib/pricing';
 import { APP_CONTEXT } from '../lib/appcontext';
 import { approxTokens, newMemory, PERSONA_PRESETS, PROFILE_CHAR_CAP, profileSize } from '../lib/profile';
 import ConnectorsTab from './ConnectorsTab';
+import SuperAgentSettings from './SuperAgentSettings';
 import { errText, uid } from '../lib/util';
 
 function ModelTags({ list, onChange, placeholder, id }) {
@@ -122,7 +123,7 @@ function FallbackList({ settings, options, list, onChange }) {
           <button className='btn' onClick={() => { onChange([...list, matchOption(left, pick) || left[0].id]); setPick(''); }}>Add</button>
         </div>
       )}
-      <div className='hint'>The Agent can only use Gemini and OpenRouter models, so other providers in this list are skipped there. Every reply says which model answered.</div>
+      <div className='hint'>The Assistant agent can only use Gemini and OpenRouter models, so other providers in this list are skipped there. The Super Agent has its own provider choice in the Super Agent tab.</div>
     </div>
   );
 }
@@ -200,7 +201,7 @@ function PersonalityTab({ s, set }) {
   );
 }
 
-export default function SettingsView({ settings, onSave, conn, name, linked, onSignOut, onDisconnect }) {
+export default function SettingsView({ settings, onSave, conn, name, linked, onSignOut, onDisconnect, onConnect, theme, setTheme }) {
   const [s, setS] = useState(settings);
   const [tab, setTab] = useState('general');
   const [saved, setSaved] = useState('');
@@ -210,7 +211,8 @@ export default function SettingsView({ settings, onSave, conn, name, linked, onS
   const [adding, setAdding] = useState(false);
   const [month, setMonth] = useState(monthKey());
 
-  useEffect(() => { sharedStatus(conn).then(setUsage); }, [conn]);
+  useEffect(() => { sharedStatus(conn).then(setUsage).catch(() => {}); }, [conn]);
+  const local = !!conn?.local;
   // Notes saved from a chat while this page is open show up here too.
   useEffect(() => { setS((x) => (x.memories === settings.memories ? x : { ...x, memories: settings.memories })); }, [settings.memories]);
 
@@ -251,7 +253,7 @@ export default function SettingsView({ settings, onSave, conn, name, linked, onS
           <button className='btn primary small' onClick={save}>Save</button>
         </div>
         <div className='tabs' role='tablist' aria-label='Settings sections'>
-          {[['general', 'General'], ['personality', 'Personality'], ['connectors', 'Connectors'], ['models', 'Models'], ['usage', 'Usage']].map(([id, l]) => <button key={id} role='tab' aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{l}</button>)}
+          {[['general', 'General'], ['models', 'Models'], ['superagent', 'Super Agent'], ['personality', 'Personality'], ['connectors', 'Connectors'], ['data', 'Data'], ['usage', 'Usage']].map(([id, l]) => <button key={id} role='tab' aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{l}</button>)}
         </div>
 
         {tab === 'general' && (
@@ -260,14 +262,18 @@ export default function SettingsView({ settings, onSave, conn, name, linked, onS
               <h2>Account</h2>
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
                 <span className='avatar'>{name.slice(0, 1).toUpperCase()}</span>
-                <div style={{ flex: '1 1 160px' }}><strong>{name}</strong><div className='hint'>{linked ? 'Connection saved with your account' : 'Connection not saved with your account yet'}</div></div>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ flex: '1 1 160px' }}><strong>{name}</strong><div className='hint'>{local ? 'Chats are saved on this device' : linked ? 'Synced with your Supabase project' : 'Supabase connected, not saved with your account yet'}</div></div>
                 <button className='btn' onClick={() => (confirmOut === 'out' ? onSignOut() : setConfirmOut('out'))}><Icon name='logout' size={16} /> {confirmOut === 'out' ? (linked ? 'Tap again to sign out' : 'Not saved yet. Tap again') : 'Sign out'}</button>
-                <a className='btn' href={`https://supabase.com/dashboard/project/${conn.ref}`} target='_blank' rel='noreferrer'>Open my database</a>
-                <button className='btn danger' onClick={() => (confirmOut === 'dc' ? onDisconnect() : setConfirmOut('dc'))}>{confirmOut === 'dc' ? 'Tap again to disconnect' : 'Disconnect database'}</button>
               </div>
-              <div className='hint'>Your chats and files live in your own Supabase project. The model you pick still reads each message to answer it.</div>
+            </section>
+            <section className='card'>
+              <h2>Appearance</h2>
+              <div className='seg' role='radiogroup' aria-label='Theme'>
+                {[['dark', 'Dark', 'moon'], ['light', 'Light', 'sun'], ['system', 'Match device', 'layers']].map(([id, l, ic]) => (
+                  <button key={id} role='radio' aria-checked={theme === id} className={theme === id ? 'on' : ''} onClick={() => setTheme?.(id)}><Icon name={ic} size={16} /> {l}</button>
+                ))}
+              </div>
+              <div className='hint'>Saved on this device straight away.</div>
             </section>
             <section className='card'>
               <h2>Default models</h2>
@@ -294,6 +300,38 @@ export default function SettingsView({ settings, onSave, conn, name, linked, onS
         )}
 
         {tab === 'personality' && <PersonalityTab s={s} set={set} />}
+
+        {tab === 'superagent' && (
+          <>
+            <SuperAgentSettings s={s} set={set} />
+            <div className='hint' style={{ padding: '0 4px' }}>Add keys and models for more providers in the Models tab. They show up here as choices.</div>
+          </>
+        )}
+
+        {tab === 'data' && (
+          <section className='card'>
+            <div className='card-head'>
+              <span className='card-icon'><Icon name='db' size={18} /></span>
+              <div>
+                <h2>Where your data lives</h2>
+                <div className='hint'>{local ? 'Chats, projects and workflows are saved in this browser. Nothing to set up.' : 'Chats, projects and workflows are saved in your own Supabase project.'}</div>
+              </div>
+            </div>
+            <div className={'store-pill' + (local ? '' : ' cloud')}><Icon name={local ? 'monitor' : 'db'} size={16} /> {local ? 'This device' : `Supabase · ${conn?.ref}`}</div>
+            {local ? (
+              <>
+                <div className='hint'>Want your chats on every device? Connect a free Supabase project. Studio sets it up for you, with no code. This is optional, and you can do it any time.</div>
+                <div className='inline'><button className='btn primary' onClick={onConnect}><Icon name='db' size={16} /> Connect Supabase (optional)</button></div>
+                <div className='hint'>Chats already on this device stay here. They are not copied to Supabase.</div>
+              </>
+            ) : (
+              <div className='inline'>
+                <a className='btn' href={`https://supabase.com/dashboard/project/${conn?.ref}`} target='_blank' rel='noreferrer'>Open my database</a>
+                <button className='btn danger' onClick={() => (confirmOut === 'dc' ? onDisconnect() : setConfirmOut('dc'))}>{confirmOut === 'dc' ? 'Tap again to disconnect' : 'Disconnect and use this device'}</button>
+              </div>
+            )}
+          </section>
+        )}
 
         {tab === 'connectors' && <ConnectorsTab s={s} set={set} />}
 

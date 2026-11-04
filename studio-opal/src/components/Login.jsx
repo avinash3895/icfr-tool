@@ -28,7 +28,7 @@ export default function Login({ initialError, onSignedIn }) {
   return (
     <div className='onboard'>
       <div className='onboard-card'>
-        <div className='brand'><Logo size={34} /><span style={{ color: '#0f2329' }}>Studio</span></div>
+        <div className='brand'><Logo size={34} /><span>Studio</span></div>
         <h1>Chat, and build workflows that work your way</h1>
         <p className='lead'>Sign in once. Your connection to your own database is saved with your account, so any browser you sign in on is ready to go.</p>
         <div className='tabs' role='tablist' aria-label='Sign in or create account'>

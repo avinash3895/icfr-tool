@@ -20,6 +20,8 @@ import { addUsage } from './lib/pricing';
 import { useVoice } from './lib/useVoice';
 import { DEFAULT_SETTINGS } from './lib/config';
 import { errText } from './lib/util';
+import { localConn, openLocal, setWantsLocal, wantsLocal } from './lib/localdb';
+import ErrorBoundary from './components/ErrorBoundary';
 import './theme.css';
 
 const NAV = [
@@ -65,7 +67,7 @@ export default function App() {
   const [needsLink, setNeedsLink] = useState(false);
   const [linkPass, setLinkPass] = useState('');
   const [view, setView] = useState(() => localStorage.getItem('studio:view') || 'auto');
-  const [theme, setTheme] = useState(() => localStorage.getItem('studio:theme') || 'system');
+  const [theme, setTheme] = useState(() => localStorage.getItem('studio:theme') || 'dark');
   const [vw, setVw] = useState(window.innerWidth);
   const voice = useVoice(settings, setNotice);
   const settingsRef = useRef(settings);
@@ -129,19 +131,39 @@ export default function App() {
     return () => setUsageSink(null);
   }, [db]);
 
-  const open = async (c) => {
+  const boot = async (client, c) => {
+    const s = await loadSettings(client);
+    setConn(c); setDb(client); setSettings(s);
+    const [cv, ag] = await Promise.all([listConversations(client), listAgents(client).catch(() => [])]);
+    setConvs(await withNums(client, cv)); setAgents(ag);
+    setPhase('app');
+    syncAgent(s, true);
+  };
+
+  // Keeps everything in this browser. Used when no Supabase project is connected, so login goes straight into Studio.
+  const openLocalMode = async (u, why) => {
     try {
-      const client = await signIn(c);
-      const s = await loadSettings(client);
-      setConn(c); setDb(client); setSettings(s);
-      const [cv, ag] = await Promise.all([listConversations(client), listAgents(client)]);
-      setConvs(await withNums(client, cv)); setAgents(ag);
-      setPhase('app');
-      syncAgent(s, true);
+      const client = await openLocal();
+      await boot(client, localConn(u || userRef.current));
+      setWantsLocal(true);
+      if (why) setNotice(why);
       return true;
     } catch (e) {
-      setBootError(errText(e) + ' If this keeps happening, connect Supabase again.');
-      setPhase('connect');
+      setBootError('This browser blocked local storage (' + errText(e) + '). Turn off private browsing, or connect Supabase in Settings.');
+      setPhase('fatal');
+      return false;
+    }
+  };
+
+  const open = async (c, { fallback = true } = {}) => {
+    try {
+      const client = await signIn(c);
+      await boot(client, c);
+      return true;
+    } catch (e) {
+      if (!fallback) throw e;
+      // Never get stuck on a setup screen: open Studio on this device and say what happened.
+      await openLocalMode(userRef.current, 'Could not reach your Supabase project (' + errText(e) + '). Studio is using this device for now. You can reconnect in Settings → Data.');
       return false;
     }
   };
@@ -166,10 +188,12 @@ export default function App() {
       if (password) {
         try { const c = await openConn(blob, password, u.id); saveConn(c); await open(c); return; } catch (e) { setBootError(errText(e)); }
       }
+      // Chose this device earlier: do not ask for the password again on every visit.
+      if (wantsLocal()) { await openLocalMode(u); return; }
       setPhase('unlock');
       return;
     }
-    setPhase('connect');
+    await openLocalMode(u);
   };
 
   useEffect(() => {
@@ -178,23 +202,31 @@ export default function App() {
       try { cfg = await getAppConfig(); } catch (e) { setBootError(errText(e)); }
       setConfig(cfg);
       let t = null;
-      try { t = await finishOAuth(); } catch (e) { setBootError(errText(e)); }
+      let oauthErr = '';
+      try { t = await finishOAuth(); } catch (e) { oauthErr = errText(e); }
       setToken(t || loadToken());
-      const u = await currentUser();
+      let u = null;
+      try { u = await currentUser(); } catch { u = null; }
       if (!u) { setPhase('login'); return; }
+      userRef.current = u;
       setUser(u);
+      // Coming back from the Supabase approval page: let the user pick a project.
+      if (t || oauthErr) { setBootError(oauthErr); setPhase('connect'); return; }
       await route(u, getPassword());
     })();
   }, []); // eslint-disable-line
 
   const onSignedIn = async (u, password) => {
     rememberPassword(password);
+    userRef.current = u;
     setUser(u); setBootError('');
     await route(u, password);
   };
   const onConnected = async (c) => {
     setBootError('');
-    const ok = await open(c);
+    setWantsLocal(false);
+    let ok = false;
+    try { ok = await open(c, { fallback: false }); } catch (e) { setBootError(errText(e)); setPhase('connect'); return; }
     if (!ok) return;
     const pw = getPassword();
     if (pw) await linkNow(c, userRef.current, pw); else setNeedsLink(true);
@@ -208,7 +240,8 @@ export default function App() {
     } catch (e) { setNotice(errText(e)); }
   };
   const doSignOut = async () => { await signOut(); clearConn(); location.reload(); };
-  const doDisconnect = async () => { try { await saveLinkedBlob(null); } catch { /* ignore */ } clearConn(); location.reload(); };
+  const doDisconnect = async () => { try { await saveLinkedBlob(null); } catch { /* ignore */ } clearConn(); setWantsLocal(true); location.reload(); };
+  const startConnect = () => { setBootError(''); setPhase('connect'); };
 
   const refreshConvs = () => db && listConversations(db).then((cv) => withNums(db, cv)).then(setConvs).catch(() => {});
 
@@ -281,21 +314,22 @@ export default function App() {
     syncAgent(settingsRef.current, false);
   };
 
-  if (phase === 'loading') return <div className='onboard'><div className='thinking' style={{ color: '#fff' }}><i /><i /><i /> Opening Studio...</div></div>;
+  if (phase === 'loading') return <div className='boot'><div className='boot-mark'><Logo size={40} /></div><div className='thinking'><i /><i /><i /> Opening Studio…</div></div>;
+  if (phase === 'fatal') return <div className='boot'><div className='boot-card'><Logo size={36} /><h1>Studio could not start</h1><p className='hint'>{bootError}</p><button className='btn primary' onClick={() => location.reload()}>Try again</button></div></div>;
   if (phase === 'login') return <Login initialError={bootError} onSignedIn={onSignedIn} />;
   if (phase === 'unlock') {
     return (
       <Unlock name={displayName(user)} initialError={bootError}
         onUnlock={async (pw) => { const c = await openConn(linkedBlob(user), pw, user.id); rememberPassword(pw); saveConn(c); await open(c); }}
-        onReconnect={() => { setBootError(''); setPhase('connect'); }} />
+        onReconnect={() => { setBootError(''); openLocalMode(user, 'Using this device for now. Your Supabase data is still there: unlock it any time from Settings → Data.'); }} />
     );
   }
-  if (phase === 'connect') return <Onboarding config={config} token={token} name={displayName(user)} initialError={bootError} onConnected={onConnected} />;
+  if (phase === 'connect') return <Onboarding config={config} token={token} name={displayName(user)} initialError={bootError} onConnected={onConnected} onCancel={() => { setBootError(''); if (db) setPhase('app'); else openLocalMode(user); }} />;
 
   const name = displayName(user);
   const initial = name.slice(0, 1).toUpperCase();
   const agent = agents.find((x) => x.id === agentId);
-  const linked = !!linkedBlob(user) && !needsLink;
+  const linked = conn?.local ? true : !!linkedBlob(user) && !needsLink;
   const plainConvs = convs.filter((c) => !chatProject[c.id]);
   const title = mode === 'chat' ? convs.find((c) => c.id === convId)?.title || '' : mode === 'workflow' ? agent?.name || 'Workflow' : mode === 'agent' ? 'Agent' : mode === 'projects' ? (project ? project.name : 'Projects') : 'Settings';
   const go = (m) => {
@@ -379,7 +413,7 @@ export default function App() {
           <div className='title'>{title}</div>
           <button className='icon-btn mbtn' aria-label='New chat' onClick={newChat}><Icon name='plus' /></button>
         </div>
-        {needsLink && (
+        {needsLink && !conn?.local && (
           <div className='banner info'>
             <span>Save your connection to your account so every new browser connects by itself. Enter your password once:</span>
             <span className='inline'><input className='field' style={{ minHeight: 36, width: 150 }} type='password' aria-label='Password' placeholder='Password' value={linkPass} onChange={(e) => setLinkPass(e.target.value)} /><button className='btn small primary' disabled={!linkPass} onClick={finishLink}>Save</button></span>
@@ -388,6 +422,7 @@ export default function App() {
         {error && <div className='banner error'><span>{error}</span><button className='btn small' onClick={() => setError('')}>Dismiss</button></div>}
         {notice && <div className='banner note'><span>{notice}</span><button className='btn small' onClick={() => setNotice('')}>Dismiss</button></div>}
 
+        <ErrorBoundary key={mode + ':' + (convId || '') + ':' + (agentId || '')} onError={setError}>
         {mode === 'chat' && <ChatView key={`${conn.ref}:chat`} db={db} conn={conn} settings={settings} convId={convId} setConvId={setConvId} refreshConvs={refreshConvs} onNotice={setNotice} onError={setError} voice={voice} name={name} onAddMemory={addMemory} />}
         {mode === 'projects' && project && projChat && (
           <>
@@ -408,7 +443,8 @@ export default function App() {
             <button className='btn primary' onClick={newAgent}><Icon name='plus' /> Create your first workflow</button>
           </div>
         )}
-        {mode === 'settings' && <SettingsView settings={settings} onSave={onSaveSettings} conn={conn} name={name} linked={linked} onSignOut={doSignOut} onDisconnect={doDisconnect} />}
+        {mode === 'settings' && <SettingsView settings={settings} onSave={onSaveSettings} conn={conn} name={name} linked={linked} onSignOut={doSignOut} onDisconnect={doDisconnect} onConnect={startConnect} theme={theme} setTheme={setTheme} />}
+        </ErrorBoundary>
       </main>
 
       {acct && (

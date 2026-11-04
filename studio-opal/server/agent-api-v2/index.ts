@@ -145,6 +145,7 @@ Deno.serve(async (req: Request) => {
           search_provider: settings.search_provider, has_search_key: !!settings.search_key,
           google_client_id: settings.google_client_id || "", has_google_secret: !!settings.google_client_secret,
           google_redirect: `${FN_URL}/agent-api-v2/oauth/google`, has_openrouter: !!(await orKey(userId)),
+          llm_provider: settings.llm_provider || "openrouter", llm_base_url: settings.llm_base_url || "", has_llm_key: !!settings.llm_key,
         },
         tool_groups: TOOL_GROUPS, active: activeCount || 0,
       });
@@ -289,6 +290,13 @@ Deno.serve(async (req: Request) => {
       if ("retry_cap" in p) patch.retry_cap = Math.max(0, Math.min(Number(p.retry_cap) || 0, 5));
       if ("search_provider" in p) patch.search_provider = ["auto", "tavily", "brave"].includes(p.search_provider) ? p.search_provider : "auto";
       if (typeof p.search_key === "string") patch.search_key = p.search_key.trim().slice(0, 200) || null;
+      if ("llm_provider" in p) patch.llm_provider = String(p.llm_provider || "openrouter").replace(/[^\w.-]/g, "").slice(0, 40) || "openrouter";
+      if ("llm_base_url" in p) {
+        const u = String(p.llm_base_url || "").trim().slice(0, 300);
+        if (u && !/^https:\/\/[^\s/]+(\/[^\s]*)?$/i.test(u)) return json({ error: "The API address must start with https:// (the server cannot reach localhost)." }, 400);
+        patch.llm_base_url = u || null;
+      }
+      if (typeof p.llm_key === "string") patch.llm_key = p.llm_key.trim().slice(0, 400) || null;
       if (typeof p.google_client_id === "string") patch.google_client_id = p.google_client_id.trim().slice(0, 300) || null;
       if (typeof p.google_client_secret === "string" && p.google_client_secret.trim()) patch.google_client_secret = p.google_client_secret.trim().slice(0, 300);
       await getSettings(userId);
