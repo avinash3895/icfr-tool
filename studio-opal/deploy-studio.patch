@@ -1,0 +1,1214 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index d492570..7b95489 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -22,3 +22,6 @@ import { DEFAULT_SETTINGS } from './lib/config';
+ import { errText } from './lib/util';
++import { localConn, openLocal, setWantsLocal, wantsLocal } from './lib/localdb';
++import ErrorBoundary from './components/ErrorBoundary';
+ import './theme.css';
++import './fiesta.css';
+ 
+@@ -67,3 +70,3 @@ export default function App() {
+   const [view, setView] = useState(() => localStorage.getItem('studio:view') || 'auto');
+-  const [theme, setTheme] = useState(() => localStorage.getItem('studio:theme') || 'system');
++  const [theme, setTheme] = useState(() => localStorage.getItem('studio:theme') || 'dark');
+   const [vw, setVw] = useState(window.innerWidth);
+@@ -131,15 +134,35 @@ export default function App() {
+ 
+-  const open = async (c) => {
++  const boot = async (client, c) => {
++    const s = await loadSettings(client);
++    setConn(c); setDb(client); setSettings(s);
++    const [cv, ag] = await Promise.all([listConversations(client), listAgents(client).catch(() => [])]);
++    setConvs(await withNums(client, cv)); setAgents(ag);
++    setPhase('app');
++    syncAgent(s, true);
++  };
++
++  // Keeps everything in this browser. Used when no Supabase project is connected, so login goes straight into Studio.
++  const openLocalMode = async (u, why) => {
++    try {
++      const client = await openLocal();
++      await boot(client, localConn(u || userRef.current));
++      setWantsLocal(true);
++      if (why) setNotice(why);
++      return true;
++    } catch (e) {
++      setBootError('This browser blocked local storage (' + errText(e) + '). Turn off private browsing, or connect Supabase in Settings.');
++      setPhase('fatal');
++      return false;
++    }
++  };
++
++  const open = async (c, { fallback = true } = {}) => {
+     try {
+       const client = await signIn(c);
+-      const s = await loadSettings(client);
+-      setConn(c); setDb(client); setSettings(s);
+-      const [cv, ag] = await Promise.all([listConversations(client), listAgents(client)]);
+-      setConvs(await withNums(client, cv)); setAgents(ag);
+-      setPhase('app');
+-      syncAgent(s, true);
++      await boot(client, c);
+       return true;
+     } catch (e) {
+-      setBootError(errText(e) + ' If this keeps happening, connect Supabase again.');
+-      setPhase('connect');
++      if (!fallback) throw e;
++      // Never get stuck on a setup screen: open Studio on this device and say what happened.
++      await openLocalMode(userRef.current, 'Could not reach your Supabase project (' + errText(e) + '). Studio is using this device for now. You can reconnect in Settings → Data.');
+       return false;
+@@ -168,2 +191,4 @@ export default function App() {
+       }
++      // Chose this device earlier: do not ask for the password again on every visit.
++      if (wantsLocal()) { await openLocalMode(u); return; }
+       setPhase('unlock');
+@@ -171,3 +196,3 @@ export default function App() {
+     }
+-    setPhase('connect');
++    await openLocalMode(u);
+   };
+@@ -180,7 +205,12 @@ export default function App() {
+       let t = null;
+-      try { t = await finishOAuth(); } catch (e) { setBootError(errText(e)); }
++      let oauthErr = '';
++      try { t = await finishOAuth(); } catch (e) { oauthErr = errText(e); }
+       setToken(t || loadToken());
+-      const u = await currentUser();
++      let u = null;
++      try { u = await currentUser(); } catch { u = null; }
+       if (!u) { setPhase('login'); return; }
++      userRef.current = u;
+       setUser(u);
++      // Coming back from the Supabase approval page: let the user pick a project.
++      if (t || oauthErr) { setBootError(oauthErr); setPhase('connect'); return; }
+       await route(u, getPassword());
+@@ -191,2 +221,3 @@ export default function App() {
+     rememberPassword(password);
++    userRef.current = u;
+     setUser(u); setBootError('');
+@@ -196,3 +227,5 @@ export default function App() {
+     setBootError('');
+-    const ok = await open(c);
++    setWantsLocal(false);
++    let ok = false;
++    try { ok = await open(c, { fallback: false }); } catch (e) { setBootError(errText(e)); setPhase('connect'); return; }
+     if (!ok) return;
+@@ -210,3 +243,4 @@ export default function App() {
+   const doSignOut = async () => { await signOut(); clearConn(); location.reload(); };
+-  const doDisconnect = async () => { try { await saveLinkedBlob(null); } catch { /* ignore */ } clearConn(); location.reload(); };
++  const doDisconnect = async () => { try { await saveLinkedBlob(null); } catch { /* ignore */ } clearConn(); setWantsLocal(true); location.reload(); };
++  const startConnect = () => { setBootError(''); setPhase('connect'); };
+ 
+@@ -283,3 +317,4 @@ export default function App() {
+ 
+-  if (phase === 'loading') return <div className='onboard'><div className='thinking' style={{ color: '#fff' }}><i /><i /><i /> Opening Studio...</div></div>;
++  if (phase === 'loading') return <div className='boot'><div className='boot-mark'><Logo size={40} /></div><div className='thinking'><i /><i /><i /> Opening Studio…</div></div>;
++  if (phase === 'fatal') return <div className='boot'><div className='boot-card'><Logo size={36} /><h1>Studio could not start</h1><p className='hint'>{bootError}</p><button className='btn primary' onClick={() => location.reload()}>Try again</button></div></div>;
+   if (phase === 'login') return <Login initialError={bootError} onSignedIn={onSignedIn} />;
+@@ -289,6 +324,6 @@ export default function App() {
+         onUnlock={async (pw) => { const c = await openConn(linkedBlob(user), pw, user.id); rememberPassword(pw); saveConn(c); await open(c); }}
+-        onReconnect={() => { setBootError(''); setPhase('connect'); }} />
++        onReconnect={() => { setBootError(''); openLocalMode(user, 'Using this device for now. Your Supabase data is still there: unlock it any time from Settings → Data.'); }} />
+     );
+   }
+-  if (phase === 'connect') return <Onboarding config={config} token={token} name={displayName(user)} initialError={bootError} onConnected={onConnected} />;
++  if (phase === 'connect') return <Onboarding config={config} token={token} name={displayName(user)} initialError={bootError} onConnected={onConnected} onCancel={() => { setBootError(''); if (db) setPhase('app'); else openLocalMode(user); }} />;
+ 
+@@ -297,3 +332,3 @@ export default function App() {
+   const agent = agents.find((x) => x.id === agentId);
+-  const linked = !!linkedBlob(user) && !needsLink;
++  const linked = conn?.local ? true : !!linkedBlob(user) && !needsLink;
+   const plainConvs = convs.filter((c) => !chatProject[c.id]);
+@@ -381,3 +416,3 @@ export default function App() {
+         </div>
+-        {needsLink && (
++        {needsLink && !conn?.local && (
+           <div className='banner info'>
+@@ -390,2 +425,3 @@ export default function App() {
+ 
++        <ErrorBoundary key={mode}>
+         {mode === 'chat' && <ChatView key={`${conn.ref}:chat`} db={db} conn={conn} settings={settings} convId={convId} setConvId={setConvId} refreshConvs={refreshConvs} onNotice={setNotice} onError={setError} voice={voice} name={name} onAddMemory={addMemory} />}
+@@ -410,3 +446,4 @@ export default function App() {
+         )}
+-        {mode === 'settings' && <SettingsView settings={settings} onSave={onSaveSettings} conn={conn} name={name} linked={linked} onSignOut={doSignOut} onDisconnect={doDisconnect} />}
++        {mode === 'settings' && <SettingsView settings={settings} onSave={onSaveSettings} conn={conn} name={name} linked={linked} onSignOut={doSignOut} onDisconnect={doDisconnect} onConnect={startConnect} theme={theme} setTheme={setTheme} />}
++        </ErrorBoundary>
+       </main>
+diff --git a/src/components/ErrorBoundary.jsx b/src/components/ErrorBoundary.jsx
+new file mode 100644
+index 0000000..49baae5
+--- /dev/null
++++ b/src/components/ErrorBoundary.jsx
+@@ -0,0 +1,34 @@
++import { Component } from 'react';
++
++// Keeps one broken screen from taking down the whole app: shows what went wrong and a way back.
++export default class ErrorBoundary extends Component {
++  constructor(props) {
++    super(props);
++    this.state = { error: null };
++  }
++  static getDerivedStateFromError(error) {
++    return { error };
++  }
++  componentDidCatch(error) {
++    // eslint-disable-next-line no-console
++    console.error('Studio screen error:', error);
++  }
++  render() {
++    const { error } = this.state;
++    if (!error) return this.props.children;
++    if (this.props.fallback) return this.props.fallback(error, () => this.setState({ error: null }));
++    return (
++      <div className='crash'>
++        <div className='crash-card'>
++          <div className='crash-icon' aria-hidden='true'>!</div>
++          <h2>This screen hit a problem</h2>
++          <p className='hint'>{String(error?.message || error)}</p>
++          <div className='inline'>
++            <button className='btn primary' onClick={() => this.setState({ error: null })}>Try again</button>
++            <button className='btn' onClick={() => location.reload()}>Reload Studio</button>
++          </div>
++        </div>
++      </div>
++    );
++  }
++}
+diff --git a/src/components/Login.jsx b/src/components/Login.jsx
+index 2694520..76abc31 100644
+--- a/src/components/Login.jsx
++++ b/src/components/Login.jsx
+@@ -30,5 +30,5 @@ export default function Login({ initialError, onSignedIn }) {
+       <div className='onboard-card'>
+-        <div className='brand'><Logo size={34} /><span style={{ color: '#0f2329' }}>Studio</span></div>
++        <div className='brand'><Logo size={34} /><span>Studio</span></div>
+         <h1>Chat, and build workflows that work your way</h1>
+-        <p className='lead'>Sign in once. Your connection to your own database is saved with your account, so any browser you sign in on is ready to go.</p>
++        <p className='lead'>Sign in to your studio. Chat with every model, run agents and build workflows, all in one place.</p>
+         <div className='tabs' role='tablist' aria-label='Sign in or create account'>
+diff --git a/src/components/Onboarding.jsx b/src/components/Onboarding.jsx
+index 09ba768..e225e3f 100644
+--- a/src/components/Onboarding.jsx
++++ b/src/components/Onboarding.jsx
+@@ -6,3 +6,3 @@ import { errText } from '../lib/util';
+ 
+-export default function Onboarding({ config, token, name, onConnected, initialError }) {
++export default function Onboarding({ config, token, name, onConnected, onCancel, initialError }) {
+   const [error, setError] = useState(initialError || '');
+@@ -60,7 +60,7 @@ export default function Onboarding({ config, token, name, onConnected, initialEr
+       <div className='onboard-card'>
+-        <div className='brand'><Logo size={34} /><span style={{ color: '#0f2329' }}>Studio</span></div>
++        <div className='brand'><Logo size={34} /><span>Studio</span></div>
+         {!token && (
+           <>
+-            <h1>Connect your database{name ? `, ${name}` : ''}</h1>
+-            <p className='lead'>Studio keeps your chats, workflows and files in a Supabase project that belongs to you. You only do this once. After that it is saved with your account.</p>
++            <h1>Sync with Supabase{name ? `, ${name}` : ''}</h1>
++            <p className='lead'>Optional: keep your chats, workflows and files in a Supabase project that belongs to you, so they follow you to every device. You only do this once.</p>
+             <ol className='steps'>
+@@ -71,3 +71,3 @@ export default function Onboarding({ config, token, name, onConnected, initialEr
+             {error && <div className='banner error' style={{ margin: 0 }}>{error}</div>}
+-            <button className='btn primary' style={{ minHeight: 48 }} disabled={!config?.oauthClientId} onClick={() => startOAuth(config.oauthClientId)}><Icon name='db' /> Connect Supabase</button>
++            <button className='btn primary' style={{ minHeight: 48 }} disabled={!config?.oauthClientId} onClick={() => config?.oauthClientId && startOAuth(config.oauthClientId)}><Icon name='db' /> Connect Supabase</button>
+             {!config?.oauthClientId && <p className='hint'>Connecting is not switched on yet on the server.</p>}
+@@ -113,2 +113,3 @@ export default function Onboarding({ config, token, name, onConnected, initialEr
+         )}
++        {!busy && onCancel && <button className='btn ghost small' style={{ alignSelf: 'center' }} onClick={onCancel}>← Back to Studio (keep using this device)</button>}
+         {busy && (
+diff --git a/src/components/SettingsView.jsx b/src/components/SettingsView.jsx
+index a198a37..0d33284 100644
+--- a/src/components/SettingsView.jsx
++++ b/src/components/SettingsView.jsx
+@@ -9,2 +9,3 @@ import { approxTokens, newMemory, PERSONA_PRESETS, PROFILE_CHAR_CAP, profileSize
+ import ConnectorsTab from './ConnectorsTab';
++import SuperAgentSettings from './SuperAgentSettings';
+ import { errText, uid } from '../lib/util';
+@@ -124,3 +125,3 @@ function FallbackList({ settings, options, list, onChange }) {
+       )}
+-      <div className='hint'>The Agent can only use Gemini and OpenRouter models, so other providers in this list are skipped there. Every reply says which model answered.</div>
++      <div className='hint'>The Assistant agent can only use Gemini and OpenRouter models, so other providers in this list are skipped there. The Super Agent has its own provider choice in the Super Agent tab.</div>
+     </div>
+@@ -202,3 +203,3 @@ function PersonalityTab({ s, set }) {
+ 
+-export default function SettingsView({ settings, onSave, conn, name, linked, onSignOut, onDisconnect }) {
++export default function SettingsView({ settings, onSave, conn, name, linked, onSignOut, onDisconnect, onConnect, theme, setTheme }) {
+   const [s, setS] = useState(settings);
+@@ -212,3 +213,4 @@ export default function SettingsView({ settings, onSave, conn, name, linked, onS
+ 
+-  useEffect(() => { sharedStatus(conn).then(setUsage); }, [conn]);
++  useEffect(() => { sharedStatus(conn).then(setUsage).catch(() => {}); }, [conn]);
++  const local = !!conn?.local;
+   // Notes saved from a chat while this page is open show up here too.
+@@ -253,3 +255,3 @@ export default function SettingsView({ settings, onSave, conn, name, linked, onS
+         <div className='tabs' role='tablist' aria-label='Settings sections'>
+-          {[['general', 'General'], ['personality', 'Personality'], ['connectors', 'Connectors'], ['models', 'Models'], ['usage', 'Usage']].map(([id, l]) => <button key={id} role='tab' aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{l}</button>)}
++          {[['general', 'General'], ['models', 'Models'], ['superagent', 'Super Agent'], ['personality', 'Personality'], ['connectors', 'Connectors'], ['data', 'Data'], ['usage', 'Usage']].map(([id, l]) => <button key={id} role='tab' aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{l}</button>)}
+         </div>
+@@ -262,10 +264,14 @@ export default function SettingsView({ settings, onSave, conn, name, linked, onS
+                 <span className='avatar'>{name.slice(0, 1).toUpperCase()}</span>
+-                <div style={{ flex: '1 1 160px' }}><strong>{name}</strong><div className='hint'>{linked ? 'Connection saved with your account' : 'Connection not saved with your account yet'}</div></div>
+-              </div>
+-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
++                <div style={{ flex: '1 1 160px' }}><strong>{name}</strong><div className='hint'>{local ? 'Chats are saved on this device' : linked ? 'Synced with your Supabase project' : 'Supabase connected, not saved with your account yet'}</div></div>
+                 <button className='btn' onClick={() => (confirmOut === 'out' ? onSignOut() : setConfirmOut('out'))}><Icon name='logout' size={16} /> {confirmOut === 'out' ? (linked ? 'Tap again to sign out' : 'Not saved yet. Tap again') : 'Sign out'}</button>
+-                <a className='btn' href={`https://supabase.com/dashboard/project/${conn.ref}`} target='_blank' rel='noreferrer'>Open my database</a>
+-                <button className='btn danger' onClick={() => (confirmOut === 'dc' ? onDisconnect() : setConfirmOut('dc'))}>{confirmOut === 'dc' ? 'Tap again to disconnect' : 'Disconnect database'}</button>
+               </div>
+-              <div className='hint'>Your chats and files live in your own Supabase project. The model you pick still reads each message to answer it.</div>
++            </section>
++            <section className='card'>
++              <h2>Appearance</h2>
++              <div className='seg' role='radiogroup' aria-label='Theme'>
++                {[['dark', 'Dark', 'moon'], ['light', 'Light', 'sun'], ['system', 'Match device', 'layers']].map(([id, l, ic]) => (
++                  <button key={id} role='radio' aria-checked={theme === id} className={theme === id ? 'on' : ''} onClick={() => setTheme?.(id)}><Icon name={ic} size={16} /> {l}</button>
++                ))}
++              </div>
++              <div className='hint'>Saved on this device straight away.</div>
+             </section>
+@@ -297,2 +303,34 @@ export default function SettingsView({ settings, onSave, conn, name, linked, onS
+ 
++        {tab === 'superagent' && (
++          <>
++            <SuperAgentSettings s={s} set={set} />
++            <div className='hint' style={{ padding: '0 4px' }}>Add keys and models for more providers in the Models tab. They show up here as choices.</div>
++          </>
++        )}
++
++        {tab === 'data' && (
++          <section className='card'>
++            <div className='card-head'>
++              <span className='card-icon'><Icon name='db' size={18} /></span>
++              <div>
++                <h2>Where your data lives</h2>
++                <div className='hint'>{local ? 'Chats, projects and workflows are saved in this browser. Nothing to set up.' : 'Chats, projects and workflows are saved in your own Supabase project.'}</div>
++              </div>
++            </div>
++            <div className={'store-pill' + (local ? '' : ' cloud')}><Icon name={local ? 'monitor' : 'db'} size={16} /> {local ? 'This device' : `Supabase · ${conn?.ref}`}</div>
++            {local ? (
++              <>
++                <div className='hint'>Want your chats on every device? Connect a free Supabase project. Studio sets it up for you, with no code. This is optional, and you can do it any time.</div>
++                <div className='inline'><button className='btn primary' onClick={onConnect}><Icon name='db' size={16} /> Connect Supabase (optional)</button></div>
++                <div className='hint'>Chats already on this device stay here. They are not copied to Supabase.</div>
++              </>
++            ) : (
++              <div className='inline'>
++                <a className='btn' href={`https://supabase.com/dashboard/project/${conn?.ref}`} target='_blank' rel='noreferrer'>Open my database</a>
++                <button className='btn danger' onClick={() => (confirmOut === 'dc' ? onDisconnect() : setConfirmOut('dc'))}>{confirmOut === 'dc' ? 'Tap again to disconnect' : 'Disconnect and use this device'}</button>
++              </div>
++            )}
++          </section>
++        )}
++
+         {tab === 'connectors' && <ConnectorsTab s={s} set={set} />}
+diff --git a/src/components/SuperAgent.jsx b/src/components/SuperAgent.jsx
+index 6c08ac2..37ea83f 100644
+--- a/src/components/SuperAgent.jsx
++++ b/src/components/SuperAgent.jsx
+@@ -140,3 +140,3 @@ function AgentEditor({ agent, groups, onSave, onDelete, onClose }) {
+       </div>
+-      <label className="sa-field">Model (optional, any OpenRouter id)<input value={f.model} onChange={(e) => up('model', e.target.value)} placeholder="Uses your Super Agent model when empty" /></label>
++      <label className="sa-field">Model (optional, a model id from your Super Agent provider)<input value={f.model} onChange={(e) => up('model', e.target.value)} placeholder="Uses your Super Agent model when empty" /></label>
+       <div className="sa-field">Schedule (optional)
+@@ -187,4 +187,5 @@ function SettingsSheet({ s, onClose, onSaved }) {
+     <Sheet title="Super Agent settings" onClose={onClose}>
+-      {!s.has_openrouter && <div className="sa-note bad">No OpenRouter key is saved. Add it in Settings → Agent first.</div>}
+-      <label className="sa-field">Model (any OpenRouter model id)
++      {!s.has_openrouter && <div className="sa-note bad">No API key is saved for the Super Agent. Pick a provider and key in Settings → Super Agent.</div>}
++      <div className="sa-note">Provider: <strong>{s.llm_provider || 'openrouter'}</strong>. Change the provider, model and API key in Settings → Super Agent.</div>
++      <label className="sa-field">Model id
+         <div className="sa-row"><input value={f.model} onChange={(e) => up('model', e.target.value)} placeholder="deepseek/deepseek-v4.1-flash" /><button className="sa-btn sm" onClick={test} disabled={testing || !f.model}>{testing ? '…' : 'Test'}</button></div>
+diff --git a/src/components/SuperAgentSettings.jsx b/src/components/SuperAgentSettings.jsx
+new file mode 100644
+index 0000000..e012653
+--- /dev/null
++++ b/src/components/SuperAgentSettings.jsx
+@@ -0,0 +1,204 @@
++import { useEffect, useMemo, useState } from 'react';
++import { Icon } from './Icons';
++import { sa } from '../lib/superagent';
++import { errText } from '../lib/util';
++
++// The Super Agent runs on the Studio server and talks to any OpenAI-compatible API.
++// These are the providers you can pick, built from the same keys and models you set up for chat.
++const OPENROUTER = 'https://openrouter.ai/api/v1';
++const GEMINI_OAI = 'https://generativelanguage.googleapis.com/v1beta/openai';
++const CLAUDE_OAI = 'https://api.anthropic.com/v1';
++
++const isLocalUrl = (u) => /^http:\/\/|localhost|127\.0\.0\.1/i.test(u || '');
++
++export function superAgentProviders(s) {
++  const list = [];
++  const orProv = (s.providers || []).find((p) => /openrouter\.ai/i.test(p.baseUrl || ''));
++  list.push({ id: 'openrouter', name: 'OpenRouter', baseUrl: OPENROUTER, key: orProv?.key || '', models: orProv?.models || [], hint: 'Hundreds of models with one key, including free ones.' });
++  list.push({ id: 'gemini', name: 'Google Gemini', baseUrl: GEMINI_OAI, key: s.keys?.gemini || '', models: s.models?.gemini || [], hint: 'Uses Gemini through its OpenAI-compatible API.' });
++  list.push({ id: 'claude', name: 'Anthropic Claude', baseUrl: CLAUDE_OAI, key: s.keys?.claude || '', models: s.models?.claude || [], hint: 'Uses Claude through its OpenAI-compatible API.' });
++  for (const p of s.providers || []) {
++    if (/openrouter\.ai/i.test(p.baseUrl || '')) continue;
++    list.push({ id: `p:${p.id}`, name: p.name || 'Custom', baseUrl: p.baseUrl || '', key: p.key || '', models: p.models || [], local: isLocalUrl(p.baseUrl), hint: isLocalUrl(p.baseUrl) ? 'Runs on your computer, so the Studio server cannot reach it.' : '' });
++  }
++  list.push({ id: 'custom', name: 'Other (OpenAI-compatible)', baseUrl: '', key: '', models: [], hint: 'Any https address that speaks the OpenAI chat API.' });
++  return list;
++}
++
++const serverId = (pid) => (pid === 'openrouter' ? 'openrouter' : pid.replace(/^p:/, '').replace(/[^\w.-]/g, '').slice(0, 40) || 'custom');
++
++export default function SuperAgentSettings({ s, set }) {
++  const providers = useMemo(() => superAgentProviders(s), [s]);
++  const pref = s.superAgent || {};
++  const [state, setState] = useState(null);
++  const [loadErr, setLoadErr] = useState('');
++  const [f, setF] = useState(null);
++  const [msg, setMsg] = useState('');
++  const [busy, setBusy] = useState('');
++
++  useEffect(() => {
++    let live = true;
++    sa('state', {}).then((j) => {
++      if (!live) return;
++      const st = j.settings || {};
++      setState(st);
++      const pid = pref.provider || (st.llm_provider && st.llm_provider !== 'openrouter' ? (providers.find((p) => serverId(p.id) === st.llm_provider)?.id || 'custom') : 'openrouter');
++      setF({
++        provider: pid,
++        baseUrl: pid === 'custom' ? st.llm_base_url || pref.baseUrl || '' : '',
++        useChatKey: pref.useChatKey !== false,
++        key: '',
++        model: st.model || '',
++        fallbacks: (st.fallbacks || []).join(', '),
++        max_helpers: st.max_helpers || 2, step_cap: st.step_cap || 20, retry_cap: st.retry_cap ?? 2,
++      });
++    }).catch((e) => { if (live) setLoadErr(errText(e)); });
++    return () => { live = false; };
++  }, []); // eslint-disable-line
++
++  if (loadErr) {
++    return (
++      <section className='card'>
++        <h2>Super Agent</h2>
++        <div className='banner error' style={{ margin: 0 }}>Could not reach the Super Agent server: {loadErr}</div>
++        <div className='hint'>The Super Agent runs on the Studio server. Check your internet connection and open this tab again.</div>
++      </section>
++    );
++  }
++  if (!f) return <section className='card'><h2>Super Agent</h2><div className='thinking'><i /><i /><i /> Loading Super Agent settings…</div></section>;
++
++  const prov = providers.find((p) => p.id === f.provider) || providers[0];
++  const baseUrl = prov.id === 'custom' ? f.baseUrl.trim() : prov.baseUrl;
++  const chatKey = prov.key;
++  const canUseChatKey = !!chatKey && prov.id !== 'custom';
++  const usingChatKey = canUseChatKey && f.useChatKey;
++  const up = (k, v) => { setF((x) => ({ ...x, [k]: v })); setMsg(''); };
++  const savedKey = state?.has_llm_key;
++
++  const body = () => {
++    const b = {
++      llm_provider: serverId(prov.id),
++      llm_base_url: prov.id === 'openrouter' ? '' : baseUrl,
++      model: f.model.trim(),
++      fallbacks: f.fallbacks.split(',').map((x) => x.trim()).filter(Boolean),
++      max_helpers: f.max_helpers, step_cap: f.step_cap, retry_cap: f.retry_cap,
++    };
++    if (usingChatKey) b.llm_key = chatKey;
++    else if (f.key.trim()) b.llm_key = f.key.trim();
++    // Switching provider without a new key: drop the old provider's key so it is never sent to the wrong service.
++    else if ((state?.llm_provider || 'openrouter') !== b.llm_provider) b.llm_key = '';
++    return b;
++  };
++
++  const problem = () => {
++    if (prov.local) return 'This provider runs on your computer. The Super Agent works on the Studio server, so pick a provider with an https address.';
++    if (prov.id !== 'openrouter' && !/^https:\/\//i.test(baseUrl)) return 'Enter the provider address. It must start with https://';
++    if (!f.model.trim()) return 'Pick or type a model.';
++    if (prov.id !== 'openrouter' && !usingChatKey && !f.key.trim() && !(savedKey && state?.llm_provider === serverId(prov.id))) return 'Add an API key for this provider.';
++    return '';
++  };
++
++  const save = async () => {
++    const p = problem();
++    if (p) { setMsg(p); return; }
++    setBusy('save'); setMsg('');
++    try {
++      await sa('settings_save', body());
++      set({ superAgent: { provider: prov.id, useChatKey: f.useChatKey, baseUrl: prov.id === 'custom' ? baseUrl : '' } });
++      const j = await sa('state', {});
++      setState(j.settings || {});
++      up('key', '');
++      setMsg('Saved ✓ The Super Agent now uses ' + prov.name + ' · ' + f.model.trim());
++    } catch (e) { setMsg(errText(e)); } finally { setBusy(''); }
++  };
++  const test = async () => {
++    const p = problem();
++    if (p) { setMsg(p); return; }
++    setBusy('test'); setMsg('');
++    try {
++      await sa('settings_save', body());
++      const r = await sa('test_model', { model: f.model.trim() });
++      setMsg(r.ok ? `✓ ${r.model} answered: "${r.reply}"` : `✕ ${r.error}`);
++      const j = await sa('state', {});
++      setState(j.settings || {});
++    } catch (e) { setMsg(errText(e)); } finally { setBusy(''); }
++  };
++
++  const ok = /^✓|^Saved/.test(msg);
++
++  return (
++    <>
++      <section className='card'>
++        <div className='card-head'>
++          <span className='card-icon'><Icon name='bolt' size={18} /></span>
++          <div>
++            <h2>Super Agent model</h2>
++            <div className='hint'>Choose which AI the Super Agent thinks with, the same way you pick models for chat. It runs on the Studio server, so tasks keep going when Studio is closed.</div>
++          </div>
++        </div>
++
++        <span className='label'>Provider</span>
++        <div className='seg-grid' role='radiogroup' aria-label='Super Agent provider'>
++          {providers.map((p) => (
++            <button key={p.id} role='radio' aria-checked={f.provider === p.id} className={'seg-card' + (f.provider === p.id ? ' on' : '') + (p.local ? ' dim' : '')}
++              onClick={() => { setMsg(''); setF((x) => (x.provider === p.id ? x : { ...x, provider: p.id, key: '', model: p.models.includes(x.model) ? x.model : p.models[0] || '' })); }}>
++              <strong>{p.name}</strong>
++              <span className='hint'>{p.key ? 'Key saved in Models' : p.id === 'custom' ? 'Your own address' : 'No key yet'}</span>
++            </button>
++          ))}
++        </div>
++        {prov.hint && <div className='hint'>{prov.hint}</div>}
++
++        {prov.id === 'custom' && (
++          <div><label className='label' htmlFor='sa-url'>API address</label><input id='sa-url' className='field mono' placeholder='https://api.example.com/v1' value={f.baseUrl} onChange={(e) => up('baseUrl', e.target.value)} /></div>
++        )}
++
++        <div>
++          <label className='label' htmlFor='sa-model'>Model</label>
++          <input id='sa-model' className='field mono' list='sa-models' placeholder={prov.id === 'openrouter' ? 'deepseek/deepseek-v4.1-flash' : prov.models[0] || 'model-name'} value={f.model} onChange={(e) => up('model', e.target.value)} />
++          <datalist id='sa-models'>{prov.models.map((m) => <option key={m} value={m} />)}</datalist>
++          {prov.models.length > 0 && (
++            <div className='tags' style={{ marginTop: 8 }}>
++              {prov.models.slice(0, 12).map((m) => <button key={m} className={'tag' + (f.model === m ? ' on' : '')} onClick={() => up('model', m)}>{m}</button>)}
++            </div>
++          )}
++        </div>
++
++        <div className='keybox'>
++          <span className='label'>API key</span>
++          {canUseChatKey && (
++            <label className='check'>
++              <input type='checkbox' checked={f.useChatKey} onChange={(e) => up('useChatKey', e.target.checked)} />
++              <span>Use the {prov.name} key from Settings → Models<span className='hint' style={{ display: 'block' }}>The same key your chats use. Turn off to give the Super Agent its own key.</span></span>
++            </label>
++          )}
++          {!usingChatKey && (
++            <div>
++              <label className='sr' htmlFor='sa-key'>Super Agent API key</label>
++              <input id='sa-key' className='field mono' type='password' autoComplete='off' placeholder={savedKey ? 'Saved on the server · type to replace' : prov.id === 'openrouter' ? 'Leave empty to use your OpenRouter key' : 'Paste the API key'} value={f.key} onChange={(e) => up('key', e.target.value)} />
++            </div>
++          )}
++          <div className='hint'>The key is stored on the Studio server where this browser cannot read it back.</div>
++        </div>
++
++        <div><label className='label' htmlFor='sa-fb'>Fallback models (comma separated, tried when the first one is limited)</label><input id='sa-fb' className='field mono' value={f.fallbacks} onChange={(e) => up('fallbacks', e.target.value)} placeholder='another-model, a-third-model' /></div>
++
++        <details className='more'>
++          <summary>Advanced</summary>
++          <div className='grid3'>
++            <div><label className='label' htmlFor='sa-h'>Helpers at once</label><input id='sa-h' className='field' type='number' min={1} max={5} value={f.max_helpers} onChange={(e) => up('max_helpers', e.target.value)} /></div>
++            <div><label className='label' htmlFor='sa-s'>Step limit</label><input id='sa-s' className='field' type='number' min={4} max={40} value={f.step_cap} onChange={(e) => up('step_cap', e.target.value)} /></div>
++            <div><label className='label' htmlFor='sa-r'>Self-check retries</label><input id='sa-r' className='field' type='number' min={0} max={5} value={f.retry_cap} onChange={(e) => up('retry_cap', e.target.value)} /></div>
++          </div>
++        </details>
++
++        {msg && <div className={'banner ' + (ok ? 'ok' : 'error')} style={{ margin: 0 }}>{msg}</div>}
++        <div className='inline end'>
++          <button className='btn' onClick={test} disabled={!!busy}>{busy === 'test' ? 'Testing…' : 'Save and test'}</button>
++          <button className='btn primary' onClick={save} disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save Super Agent'}</button>
++        </div>
++      </section>
++      <div className='hint' style={{ padding: '0 4px' }}>Currently on the server: <span className='mono'>{state?.llm_provider || 'openrouter'} · {state?.model || 'default'}</span>{state?.has_llm_key ? ' · own key saved' : ''}</div>
++    </>
++  );
++}
+diff --git a/src/components/Unlock.jsx b/src/components/Unlock.jsx
+index 73ed519..958fab2 100644
+--- a/src/components/Unlock.jsx
++++ b/src/components/Unlock.jsx
+@@ -18,3 +18,3 @@ export default function Unlock({ name, onUnlock, onReconnect, initialError }) {
+       <div className='onboard-card'>
+-        <div className='brand'><Logo size={34} /><span style={{ color: '#0f2329' }}>Studio</span></div>
++        <div className='brand'><Logo size={34} /><span>Studio</span></div>
+         <h1>Welcome back, {name}</h1>
+@@ -28,3 +28,3 @@ export default function Unlock({ name, onUnlock, onReconnect, initialError }) {
+           <button className='btn primary' style={{ minHeight: 48 }} disabled={busy || !pass}>{busy ? 'Opening...' : 'Unlock'}</button>
+-          <button type='button' className='btn ghost small' onClick={onReconnect}>Connect a different Supabase project instead</button>
++          <button type='button' className='btn ghost small' onClick={onReconnect}>Skip for now and use this device</button>
+         </form>
+diff --git a/src/fiesta.css b/src/fiesta.css
+new file mode 100644
+index 0000000..cbaed8d
+--- /dev/null
++++ b/src/fiesta.css
+@@ -0,0 +1,426 @@
++/* ==========================================================================
++   Studio "Opal" look: a polished dark-first theme with glass surfaces and a
++   violet → magenta → coral accent (matching the logo). Loaded last, so it
++   sits on top of styles.css / theme.css. Light mode keeps the same language.
++   ========================================================================== */
++
++/* ---------- Tokens: dark is the default ---------- */
++html:root,
++html:root[data-theme='dark'] {
++  --bg: #07070a;
++  --bg2: #0c0c11;
++  --surface: #121218;
++  --surface2: #1a1a22;
++  --surface3: #22222c;
++  --sbbg: rgba(14, 14, 19, 0.82);
++  --ink: #f4f4f7;
++  --ink2: #c9c9d3;
++  --muted: #8a8a99;
++  --line: rgba(255, 255, 255, 0.07);
++  --line2: rgba(255, 255, 255, 0.12);
++  --accent: #a78bfa;
++  --accent-d: #c4b5fd;
++  --accent2: #f472b6;
++  --soft: rgba(139, 92, 246, 0.14);
++  --mid: #8b5cf6;
++  --light: rgba(167, 139, 250, 0.35);
++  --on: #ffffff;
++  --amber: #fbbf24;
++  --danger: #f87171;
++  --ok: #34d399;
++  --grad: linear-gradient(135deg, #7c5cff 0%, #b44bff 52%, #ff5f8f 100%);
++  --grad-soft: linear-gradient(135deg, rgba(124, 92, 255, 0.18), rgba(180, 75, 255, 0.12) 52%, rgba(255, 95, 143, 0.14));
++  --glass: rgba(20, 20, 27, 0.66);
++  --glass-line: rgba(255, 255, 255, 0.08);
++  --glow: 0 0 0 1px rgba(167, 139, 250, 0.35), 0 8px 40px -8px rgba(139, 92, 246, 0.45);
++  --shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.7), 0 1px 0 rgba(255, 255, 255, 0.03) inset;
++  --shadow-lg: 0 24px 70px -20px rgba(0, 0, 0, 0.85);
++  --ok-bg: rgba(52, 211, 153, 0.12);
++  --bad-bg: rgba(248, 113, 113, 0.12);
++  --warn-bg: rgba(251, 191, 36, 0.12);
++  --info-bg: rgba(96, 165, 250, 0.12);
++  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
++  --head: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
++  color-scheme: dark;
++}
++
++@media (prefers-color-scheme: light) {
++  html:root:not([data-theme]) {
++    --bg: #f6f6fa; --bg2: #eeeef5; --surface: #ffffff; --surface2: #f1f1f7; --surface3: #e8e8f1; --sbbg: rgba(250, 250, 253, 0.85);
++    --ink: #121218; --ink2: #3c3c48; --muted: #6e6e7e; --line: rgba(18, 18, 40, 0.08); --line2: rgba(18, 18, 40, 0.14);
++    --accent: #7c3aed; --accent-d: #6d28d9; --accent2: #db2777; --soft: rgba(124, 58, 237, 0.09); --mid: #8b5cf6; --light: rgba(124, 58, 237, 0.25);
++    --glass: rgba(255, 255, 255, 0.72); --glass-line: rgba(18, 18, 40, 0.08);
++    --glow: 0 0 0 1px rgba(124, 58, 237, 0.3), 0 10px 36px -10px rgba(124, 58, 237, 0.35);
++    --shadow: 0 10px 30px -14px rgba(30, 20, 80, 0.22); --shadow-lg: 0 28px 70px -24px rgba(30, 20, 80, 0.3);
++    --ok: #059669; --danger: #dc2626; --amber: #b45309;
++    --ok-bg: #e7f8f0; --bad-bg: #fdeceb; --warn-bg: #fff6df; --info-bg: #e9f1fe;
++    color-scheme: light;
++  }
++}
++html:root[data-theme='light'] {
++  --bg: #f6f6fa; --bg2: #eeeef5; --surface: #ffffff; --surface2: #f1f1f7; --surface3: #e8e8f1; --sbbg: rgba(250, 250, 253, 0.85);
++  --ink: #121218; --ink2: #3c3c48; --muted: #6e6e7e; --line: rgba(18, 18, 40, 0.08); --line2: rgba(18, 18, 40, 0.14);
++  --accent: #7c3aed; --accent-d: #6d28d9; --accent2: #db2777; --soft: rgba(124, 58, 237, 0.09); --mid: #8b5cf6; --light: rgba(124, 58, 237, 0.25);
++  --glass: rgba(255, 255, 255, 0.72); --glass-line: rgba(18, 18, 40, 0.08);
++  --glow: 0 0 0 1px rgba(124, 58, 237, 0.3), 0 10px 36px -10px rgba(124, 58, 237, 0.35);
++  --shadow: 0 10px 30px -14px rgba(30, 20, 80, 0.22); --shadow-lg: 0 28px 70px -24px rgba(30, 20, 80, 0.3);
++  --ok: #059669; --danger: #dc2626; --amber: #b45309;
++  --ok-bg: #e7f8f0; --bad-bg: #fdeceb; --warn-bg: #fff6df; --info-bg: #e9f1fe;
++  color-scheme: light;
++}
++
++/* ---------- Base ---------- */
++html body {
++  background: var(--bg);
++  color: var(--ink);
++  font-family: var(--sans);
++  font-size: 15px;
++  letter-spacing: -0.011em;
++  -webkit-font-smoothing: antialiased;
++  -moz-osx-font-smoothing: grayscale;
++}
++/* Soft aurora behind everything */
++html body::before {
++  content: '';
++  position: fixed;
++  inset: 0;
++  pointer-events: none;
++  z-index: 0;
++  background:
++    radial-gradient(900px 520px at 85% -10%, rgba(124, 92, 255, 0.16), transparent 60%),
++    radial-gradient(700px 480px at -10% 110%, rgba(255, 95, 143, 0.09), transparent 60%),
++    radial-gradient(600px 400px at 50% 120%, rgba(180, 75, 255, 0.07), transparent 60%);
++}
++html:root[data-theme='light'] body::before { opacity: 0.55; }
++@media (prefers-color-scheme: light) { html:root:not([data-theme]) body::before { opacity: 0.55; } }
++html #root { position: relative; z-index: 1; }
++html ::selection { background: rgba(167, 139, 250, 0.35); color: inherit; }
++html :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
++html * { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
++html ::-webkit-scrollbar { width: 10px; height: 10px; }
++html ::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 99px; border: 3px solid transparent; background-clip: padding-box; }
++html ::-webkit-scrollbar-track { background: transparent; }
++html .hint { color: var(--muted); font-size: 13px; line-height: 1.5; }
++html .label { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; margin-bottom: 6px; display: block; }
++html .mono { font-family: var(--mono); }
++
++/* ---------- Buttons ---------- */
++html .btn {
++  min-height: 40px;
++  padding: 0 16px;
++  border: 1px solid var(--line2);
++  border-radius: 12px;
++  background: var(--surface2);
++  color: var(--ink);
++  font-size: 14px;
++  font-weight: 600;
++  transition: background 0.15s, border-color 0.15s, transform 0.08s, box-shadow 0.2s;
++}
++html .btn:hover:not(:disabled) { background: var(--surface3); border-color: var(--line2); }
++html .btn:active:not(:disabled) { transform: translateY(1px); }
++html .btn.primary {
++  background: var(--grad);
++  border-color: transparent;
++  color: #fff;
++  box-shadow: 0 8px 24px -10px rgba(139, 92, 246, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.22);
++}
++html .btn.primary:hover:not(:disabled) { background: var(--grad); filter: brightness(1.08); box-shadow: 0 10px 30px -10px rgba(180, 75, 255, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
++html .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
++html .btn.ghost:hover:not(:disabled) { background: var(--surface2); color: var(--ink); }
++html .btn.danger { color: var(--danger); background: transparent; border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
++html .btn.danger:hover:not(:disabled) { background: var(--bad-bg); }
++html .btn.small { min-height: 32px; padding: 0 12px; font-size: 13px; border-radius: 10px; }
++html .btn:disabled { opacity: 0.45; }
++html .icon-btn { border-radius: 10px; color: var(--muted); transition: background 0.15s, color 0.15s; }
++html .icon-btn:hover:not(:disabled) { background: var(--surface2); color: var(--ink); }
++
++/* ---------- Inputs ---------- */
++html .field,
++html .settings input[type='number'],
++html .table input {
++  min-height: 42px;
++  border: 1px solid var(--line2);
++  border-radius: 12px;
++  background: var(--bg2);
++  color: var(--ink);
++  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
++}
++html .field::placeholder { color: color-mix(in srgb, var(--muted) 75%, transparent); }
++html .field:focus,
++html .table input:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 70%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); background: var(--surface); }
++html select.field { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 18px) 52%, calc(100% - 13px) 52%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 34px; }
++html input[type='checkbox'] { accent-color: var(--mid); width: 16px; height: 16px; }
++
++/* ---------- Banners ---------- */
++html .banner { border: 1px solid var(--line); background: var(--surface2); color: var(--ink2); border-radius: 12px; }
++html .banner.error { background: var(--bad-bg); border-color: color-mix(in srgb, var(--danger) 30%, transparent); color: var(--danger); }
++html .banner.note { background: var(--warn-bg); border-color: color-mix(in srgb, var(--amber) 30%, transparent); color: var(--ink); }
++html .banner.info { background: var(--soft); border-color: var(--light); color: var(--ink); }
++html .banner.ok { background: var(--ok-bg); border-color: color-mix(in srgb, var(--ok) 30%, transparent); color: var(--ok); }
++
++/* ---------- Shell: sidebar + main ---------- */
++html .app { background: transparent; }
++html .sidebar {
++  flex-basis: 268px;
++  padding: 14px 12px 12px;
++  background: var(--sbbg);
++  backdrop-filter: blur(22px) saturate(140%);
++  -webkit-backdrop-filter: blur(22px) saturate(140%);
++  border-right: 1px solid var(--glass-line);
++}
++html .sb-top { padding: 2px 4px 8px; }
++html .sb-brand { font-size: 18px; font-weight: 700; letter-spacing: -0.03em; gap: 10px; }
++html .sb-brand svg { filter: drop-shadow(0 4px 14px rgba(180, 75, 255, 0.45)); }
++html .sb-new {
++  min-height: 42px;
++  padding: 0 12px;
++  margin: 2px 0 6px;
++  border: 1px solid var(--line2);
++  border-radius: 12px;
++  background: var(--grad-soft);
++  font-size: 14px;
++  font-weight: 600;
++  transition: border-color 0.15s, box-shadow 0.2s;
++}
++html .sb-new:hover { border-color: var(--light); box-shadow: var(--glow); background: var(--grad-soft); }
++html .sb-plus { width: 24px; height: 24px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: var(--grad); color: #fff; box-shadow: 0 4px 12px -4px rgba(180, 75, 255, 0.8); }
++html .sb-nav { gap: 2px; }
++html .sb-nav button { min-height: 38px; border-radius: 10px; font-size: 14px; font-weight: 500; color: var(--ink2); gap: 11px; padding: 0 10px; transition: background 0.15s, color 0.15s; }
++html .sb-nav button svg { color: var(--muted); transition: color 0.15s; }
++html .sb-nav button:hover { background: var(--surface2); color: var(--ink); }
++html .sb-nav button.on { background: var(--surface2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); position: relative; }
++html .sb-nav button.on svg { color: var(--accent); }
++html .sb-nav button.on::before { content: ''; position: absolute; left: -12px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--grad); }
++html .sb-title { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 16px 10px 6px; }
++html .sb-item { border-radius: 10px; }
++html .sb-item button.go { color: var(--ink2); font-weight: 450; }
++html .sb-item:hover { background: var(--surface2); }
++html .sb-item.on { background: var(--soft); }
++html .sb-item.on button.go { color: var(--ink); font-weight: 550; }
++html .sb-foot { padding-top: 8px; border-top: 1px solid var(--line); margin-top: 4px; }
++html .sb-user { border-radius: 12px; }
++html .sb-user:hover { background: var(--surface2); }
++html .avatar { background: var(--grad); color: #fff; font-weight: 700; box-shadow: 0 4px 14px -6px rgba(180, 75, 255, 0.8); }
++html .main { background: transparent; }
++html .topbar { min-height: 56px; padding: 10px 18px; border-bottom: 1px solid transparent; }
++html .topbar .title { font-weight: 600; font-size: 14.5px; color: var(--ink2); letter-spacing: -0.01em; }
++html .app.m .topbar { background: var(--glass); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border-bottom-color: var(--glass-line); }
++html .scrim.show { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(2px); }
++
++/* Account menu */
++html .acct { background: var(--glass); backdrop-filter: blur(24px) saturate(140%); -webkit-backdrop-filter: blur(24px) saturate(140%); border: 1px solid var(--glass-line); border-radius: 16px; box-shadow: var(--shadow-lg); padding: 6px; }
++html .acct-head { padding: 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
++html .acct-item { border-radius: 10px; font-weight: 500; color: var(--ink2); }
++html .acct-item:hover { background: var(--surface2); color: var(--ink); }
++html .acct-item.danger { color: var(--danger); }
++
++/* ---------- Chat ---------- */
++html .home { gap: 28px; }
++html .hero {
++  font-size: clamp(28px, 4.4vw, 42px);
++  font-weight: 650;
++  letter-spacing: -0.04em;
++  line-height: 1.1;
++  background: linear-gradient(180deg, var(--ink) 30%, color-mix(in srgb, var(--ink) 55%, var(--accent)));
++  -webkit-background-clip: text;
++  background-clip: text;
++  color: transparent;
++}
++html .bubble { background: var(--surface2); border: 1px solid var(--line); border-radius: 18px 18px 6px 18px; color: var(--ink); padding: 11px 16px; }
++html .reply { color: var(--ink); font-size: 15.5px; line-height: 1.72; }
++html .reply code { background: var(--surface2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 0.88em; }
++html .reply pre { background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
++html .reply pre code { border: none; background: transparent; padding: 0; }
++html .reply table { border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
++html .reply th { background: var(--surface2); color: var(--ink); font-weight: 600; }
++html .reply th, html .reply td { border-color: var(--line); }
++html .reply a, html .sources a { color: var(--accent); }
++html .sources a { background: var(--surface2); border: 1px solid var(--line); border-radius: 999px; }
++html .acts .icon-btn { color: var(--muted); }
++html .thinking { color: var(--muted); }
++html .thinking i { background: var(--grad); }
++html .by { color: var(--muted); }
++
++/* Composer: glass card with a gradient ring on focus */
++html .dock { background: linear-gradient(180deg, transparent, var(--bg) 42%); padding-top: 18px; }
++html .composer {
++  background: var(--glass);
++  backdrop-filter: blur(22px) saturate(140%);
++  -webkit-backdrop-filter: blur(22px) saturate(140%);
++  border: 1px solid var(--line2);
++  border-radius: 22px;
++  box-shadow: var(--shadow);
++  transition: border-color 0.2s, box-shadow 0.25s;
++}
++html .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glow); }
++html .composer.drag { box-shadow: 0 0 0 2px var(--accent), var(--glow); }
++html .cbar textarea { color: var(--ink); font-size: 15px; }
++html .cbar textarea::placeholder { color: var(--muted); }
++html .cbtn { border-radius: 10px; color: var(--muted); }
++html .cbtn:hover:not(:disabled) { background: var(--surface2); color: var(--ink); }
++html .send { width: 40px; height: 40px; border-radius: 12px; background: var(--grad); color: #fff; box-shadow: 0 6px 18px -6px rgba(180, 75, 255, 0.9); transition: transform 0.1s, filter 0.15s, opacity 0.15s; }
++html .send:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); background: var(--grad); }
++html .send:disabled { background: var(--surface3); color: var(--muted); box-shadow: none; opacity: 1; }
++html .send.stop { background: var(--ink); color: var(--bg); }
++html .chip { background: var(--surface2); border: 1px solid var(--line); color: var(--muted); font-weight: 600; }
++html .chip:hover { color: var(--ink); border-color: var(--line2); }
++html .chip.on { background: var(--soft); border: 1px solid var(--light); color: var(--accent); }
++html .cmenu, html .model-menu { background: var(--glass); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--glass-line); border-radius: 16px; box-shadow: var(--shadow-lg); }
++html .citem { border-radius: 10px; }
++html .citem:hover:not(.static) { background: var(--surface2); }
++html .citem .sw.on { background: var(--grad); }
++
++/* Example prompts / empty states */
++html .ex, html .proj { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; transition: border-color 0.15s, transform 0.12s, box-shadow 0.2s; }
++html .ex:hover, html .proj:hover:not(:disabled) { border-color: var(--light); box-shadow: var(--glow); transform: translateY(-1px); background: var(--surface); }
++html .empty { color: var(--muted); }
++
++/* ---------- Cards, tabs, settings ---------- */
++html .settings { background: transparent; }
++html .settings-inner { max-width: 780px; gap: 18px; padding-bottom: 40px; }
++html .set-head { padding: 10px 0 2px; background: transparent; }
++html .set-head h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.035em; }
++html .card, html .provider {
++  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, var(--accent) 4%), var(--surface));
++  border: 1px solid var(--line);
++  border-radius: 18px;
++  box-shadow: var(--shadow);
++}
++html .card h2 { font-size: 16px; font-weight: 650; letter-spacing: -0.02em; margin: 0; }
++html .card-head { display: flex; gap: 12px; align-items: flex-start; }
++html .card-head h2 { margin-bottom: 4px; }
++html .card-icon { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; background: var(--grad-soft); border: 1px solid var(--light); color: var(--accent); }
++html .tabs { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 4px; gap: 2px; flex-wrap: wrap; }
++html .tabs button { border-radius: 10px; color: var(--muted); font-weight: 600; font-size: 13.5px; min-height: 34px; padding: 0 13px; transition: color 0.15s, background 0.15s; }
++html .tabs button:hover { color: var(--ink); }
++html .tabs button.on { background: var(--surface3); color: var(--ink); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 4px 12px -6px rgba(0, 0, 0, 0.5); }
++html .seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; align-self: flex-start; }
++html .seg button { white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 14px; border: none; border-radius: 10px; background: transparent; color: var(--muted); font-weight: 600; font-size: 13.5px; }
++html .seg button.on { background: var(--surface3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--light); }
++html .seg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
++html .seg-card { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; text-align: left; border: 1px solid var(--line2); border-radius: 14px; background: var(--bg2); color: var(--ink); transition: border-color 0.15s, box-shadow 0.2s, background 0.15s; }
++html .seg-card strong { font-size: 14px; font-weight: 600; }
++html .seg-card .hint { font-size: 12px; }
++html .seg-card:hover { border-color: var(--light); }
++html .seg-card.on { background: var(--grad-soft); border-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: var(--glow); }
++html .seg-card.dim { opacity: 0.6; }
++html .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
++html .app.m .grid3 { grid-template-columns: 1fr; }
++html .inline.end { justify-content: flex-end; }
++html .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
++html .check input { margin-top: 3px; }
++html .keybox { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px dashed var(--line2); border-radius: 14px; background: color-mix(in srgb, var(--bg2) 70%, transparent); }
++html details.more { border-top: 1px solid var(--line); padding-top: 12px; }
++html details.more summary { cursor: pointer; color: var(--muted); font-weight: 600; font-size: 13.5px; margin-bottom: 10px; }
++html .store-pill { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: var(--surface2); border: 1px solid var(--line2); font-size: 13px; font-weight: 600; color: var(--ink2); }
++html .store-pill.cloud { background: var(--ok-bg); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
++html .tag { background: var(--surface2); border: 1px solid var(--line); color: var(--ink2); border-radius: 999px; }
++html .tag.on, html button.tag:hover { border-color: var(--light); color: var(--ink); background: var(--soft); }
++html .table th { color: var(--muted); font-weight: 600; font-size: 12px; letter-spacing: 0.03em; }
++html .table th, html .table td { border-color: var(--line); }
++html .status { color: var(--muted); }
++html .status.done { color: var(--ok); }
++html .status.error { color: var(--danger); }
++html .fb-list li { background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; }
++html .sheet, html .sheetmask + .sheet { background: var(--surface); border: 1px solid var(--line2); box-shadow: var(--shadow-lg); }
++html .sheetmask { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(3px); }
++
++/* ---------- Login, onboarding, unlock, boot ---------- */
++html .onboard {
++  /* styles.css gives this screen fixed light colours; follow the theme instead */
++  --surface: inherit; --surface2: inherit; --ink: inherit; --ink2: inherit; --muted: inherit;
++  --line: inherit; --line2: inherit; --soft: inherit; --accent: inherit; --accent-d: inherit; --on: #fff; --bg: inherit;
++  min-height: 100%;
++  background:
++    radial-gradient(800px 500px at 15% 0%, rgba(124, 92, 255, 0.28), transparent 60%),
++    radial-gradient(700px 500px at 100% 100%, rgba(255, 95, 143, 0.16), transparent 60%),
++    var(--bg);
++}
++html .onboard-card {
++  max-width: 460px;
++  padding: 32px;
++  gap: 18px;
++  border-radius: 24px;
++  background: var(--glass);
++  backdrop-filter: blur(28px) saturate(150%);
++  -webkit-backdrop-filter: blur(28px) saturate(150%);
++  border: 1px solid var(--glass-line);
++  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
++  color: var(--ink);
++}
++html .onboard h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.035em; color: var(--ink); line-height: 1.15; }
++html .onboard .lead { color: var(--muted); font-size: 14.5px; line-height: 1.55; }
++html .onboard .brand { gap: 10px; font-size: 18px; font-weight: 700; letter-spacing: -0.03em; }
++html .onboard .brand span { color: var(--ink); }
++html .onboard .brand svg { filter: drop-shadow(0 6px 18px rgba(180, 75, 255, 0.55)); }
++html .onboard .tabs { align-self: stretch; display: grid; grid-template-columns: 1fr 1fr; background: var(--bg2); }
++html .onboard .tabs button.on { background: var(--surface3); color: var(--ink); }
++html .onboard .field { background: color-mix(in srgb, var(--bg2) 80%, transparent); }
++html .steps li { color: var(--ink2); }
++html .steps .n { background: var(--grad); color: #fff; }
++html .progress div { color: var(--ink2); }
++
++html .boot, html .crash {
++  min-height: 100%;
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  justify-content: center;
++  gap: 18px;
++  padding: 32px 20px;
++  color: var(--muted);
++}
++html .boot-mark { animation: opal-float 2.4s ease-in-out infinite; filter: drop-shadow(0 10px 30px rgba(180, 75, 255, 0.55)); }
++html .boot-card, html .crash-card { max-width: 440px; display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 28px; border-radius: 22px; background: var(--glass); border: 1px solid var(--glass-line); box-shadow: var(--shadow-lg); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
++html .boot-card h1, html .crash-card h2 { margin: 0; color: var(--ink); font-size: 20px; letter-spacing: -0.02em; }
++html .crash { min-height: 60vh; }
++html .crash-icon { width: 40px; height: 40px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; background: linear-gradient(135deg, #f87171, #ff5f8f); }
++@keyframes opal-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
++
++/* ---------- Projects, workflows, agent ---------- */
++html .agent-head h2 { letter-spacing: -0.02em; }
++html .badge { background: var(--soft); color: var(--accent); border: 1px solid var(--light); }
++html .remcard, html .working, html .failed, html .file, html .drop { background: var(--surface); border-color: var(--line); border-radius: 14px; }
++html .drop:hover, html .drop.on { border-color: var(--accent); background: var(--soft); }
++html .canvas-wrap, html .canvas { background-color: var(--bg); }
++html .canvas { background-image: radial-gradient(circle, color-mix(in srgb, var(--ink) 12%, transparent) 1px, transparent 1.2px); background-size: 22px 22px; }
++html .node { background: var(--surface); border: 1px solid var(--line2); border-radius: 16px; box-shadow: var(--shadow); }
++html .node.generate { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--glow); }
++html .node-head .ico { border-radius: 10px; }
++html .node.generate .ico { background: var(--grad); color: #fff; }
++html .edges path { stroke: color-mix(in srgb, var(--accent) 70%, transparent); }
++html .port { border-color: var(--accent); background: var(--surface); }
++html .palette { background: var(--glass); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid var(--glass-line); border-radius: 16px; box-shadow: var(--shadow); }
++html .palette button { border-radius: 10px; }
++html .palette button:hover { background: var(--surface2); }
++html .panel { background: var(--surface); border-color: var(--line); }
++
++/* ---------- Super Agent ---------- */
++html .sa-switch { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 4px; }
++html .sa-switch button { border-radius: 10px; font-weight: 600; color: var(--muted); }
++html .sa-switch button.on { background: var(--grad); color: #fff; box-shadow: 0 6px 18px -8px rgba(180, 75, 255, 0.9); }
++html .sa-agents button.on, html .sa-btn.ok, html .sa-send { background: var(--grad); border-color: transparent; color: #fff; box-shadow: 0 6px 18px -8px rgba(180, 75, 255, 0.9); }
++html .sa-icon.bell b { background: var(--grad); }
++html .sa-pill.wait { background: var(--warn-bg); color: var(--amber); }
++html .sa-pill.pause { background: var(--info-bg); color: #60a5fa; }
++html .sa-pill.ok { background: var(--ok-bg); color: var(--ok); }
++html .sa-pill.bad { background: var(--bad-bg); color: var(--danger); }
++html li.done .sa-ic { color: var(--ok); }
++html li.failed .sa-ic { color: var(--danger); }
++html li.waiting .sa-ic { color: var(--amber); }
++html .sa-approval { border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: var(--warn-bg); color: var(--ink); }
++html .sa-note.bad, html .sa-err { background: var(--bad-bg); color: var(--danger); }
++html .sa-msg.bad .sa-bubble { border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
++html .sa-btn.danger { color: var(--danger); }
++
++/* ---------- Mobile polish ---------- */
++html .app.m .sidebar { background: var(--surface); backdrop-filter: none; box-shadow: var(--shadow-lg); }
++html .app.m .sb-nav button.on::before { display: none; }
++@media (max-width: 520px) {
++  html .onboard-card { padding: 24px 20px; border-radius: 20px; }
++  html .hero { font-size: 28px; }
++  html .seg-grid { grid-template-columns: 1fr 1fr; }
++}
++@media (prefers-reduced-motion: reduce) {
++  html *, html *::before, html *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
++}
+diff --git a/src/lib/localdb.js b/src/lib/localdb.js
+new file mode 100644
+index 0000000..bb502df
+--- /dev/null
++++ b/src/lib/localdb.js
+@@ -0,0 +1,219 @@
++// A small stand-in for the Supabase client that keeps everything in this browser (IndexedDB).
++// Studio uses it when no Supabase project is connected, so the app opens straight after login.
++// It supports only the parts of the Supabase API that Studio calls (see lib/db.js).
++import { uid } from './util';
++
++const DB_NAME = 'studio-local';
++const TABLES = ['studio_conversations', 'studio_messages', 'studio_agents', 'studio_settings'];
++const FILES = 'files';
++const LOCAL_USER = { id: '00000000-0000-4000-8000-000000000001', email: 'local@studio' };
++
++let dbp = null;
++function idb() {
++  if (dbp) return dbp;
++  dbp = new Promise((resolve, reject) => {
++    const req = indexedDB.open(DB_NAME, 1);
++    req.onupgradeneeded = () => {
++      const d = req.result;
++      for (const t of TABLES) if (!d.objectStoreNames.contains(t)) d.createObjectStore(t, { keyPath: t === 'studio_settings' ? 'owner' : 'id' });
++      if (!d.objectStoreNames.contains(FILES)) d.createObjectStore(FILES);
++    };
++    req.onsuccess = () => resolve(req.result);
++    req.onerror = () => reject(req.error || new Error('This browser blocked local storage.'));
++  });
++  dbp.catch(() => { dbp = null; });
++  return dbp;
++}
++const done = (tx) => new Promise((res, rej) => { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); });
++const reqP = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
++
++async function all(table) {
++  const d = await idb();
++  return reqP(d.transaction(table).objectStore(table).getAll());
++}
++async function putMany(table, rows) {
++  const d = await idb();
++  const tx = d.transaction(table, 'readwrite');
++  const st = tx.objectStore(table);
++  rows.forEach((r) => st.put(r));
++  await done(tx);
++}
++async function delMany(table, keys) {
++  const d = await idb();
++  const tx = d.transaction(table, 'readwrite');
++  const st = tx.objectStore(table);
++  keys.forEach((k) => st.delete(k));
++  await done(tx);
++}
++
++// Timestamps that never repeat, so messages always keep their order (like clock_timestamp()).
++let lastTs = 0;
++const stamp = () => { let t = Date.now(); if (t <= lastTs) t = lastTs + 1; lastTs = t; return new Date(t).toISOString(); };
++
++function defaults(table, row) {
++  const now = stamp();
++  const base = { ...row };
++  if (table !== 'studio_settings') base.id = base.id || (crypto.randomUUID ? crypto.randomUUID() : uid() + uid());
++  base.owner = base.owner || LOCAL_USER.id;
++  if (table === 'studio_conversations') return { title: 'New chat', created_at: now, updated_at: now, ...base };
++  if (table === 'studio_messages') return { content: '', meta: {}, created_at: now, ...base };
++  if (table === 'studio_agents') return { name: 'New agent', graph: {}, chat: [], created_at: now, updated_at: now, ...base };
++  return { updated_at: now, data: {}, ...base };
++}
++
++const pick = (row, cols) => {
++  if (!cols || cols === '*') return row;
++  const out = {};
++  cols.split(',').map((c) => c.trim()).filter(Boolean).forEach((c) => { out[c] = row[c]; });
++  return out;
++};
++
++class Query {
++  constructor(table) {
++    this.table = table;
++    this.op = 'select';
++    this.filters = [];
++    this.cols = '*';
++    this.orderBy = null;
++    this.max = null;
++    this.one = null; // 'single' | 'maybe'
++    this.returning = false;
++  }
++  select(cols = '*') { if (this.op === 'select') this.cols = cols; else this.returning = true; this.retCols = cols; return this; }
++  insert(rows) { this.op = 'insert'; this.rows = Array.isArray(rows) ? rows : [rows]; return this; }
++  upsert(rows) { this.op = 'upsert'; this.rows = Array.isArray(rows) ? rows : [rows]; return this; }
++  update(patch) { this.op = 'update'; this.patch = patch; return this; }
++  delete() { this.op = 'delete'; return this; }
++  eq(c, v) { this.filters.push((r) => r[c] === v); return this; }
++  neq(c, v) { this.filters.push((r) => r[c] !== v); return this; }
++  gte(c, v) { this.filters.push((r) => r[c] >= v); return this; }
++  lte(c, v) { this.filters.push((r) => r[c] <= v); return this; }
++  is(c, v) { this.filters.push((r) => (r[c] ?? null) === v); return this; }
++  in(c, list) { this.filters.push((r) => list.includes(r[c])); return this; }
++  order(c, o = {}) { this.orderBy = { c, asc: o.ascending !== false }; return this; }
++  limit(n) { this.max = n; return this; }
++  single() { this.one = 'single'; return this; }
++  maybeSingle() { this.one = 'maybe'; return this; }
++  then(res, rej) { return this.run().then(res, rej); }
++
++  async run() {
++    try {
++      const data = await this.exec();
++      if (this.one) {
++        const list = Array.isArray(data) ? data : data ? [data] : [];
++        if (this.one === 'single' && list.length !== 1) return { data: null, error: { message: list.length ? 'More than one row' : 'No row found' } };
++        return { data: list[0] || null, error: null };
++      }
++      return { data, error: null };
++    } catch (e) {
++      return { data: null, error: { message: e?.message || String(e) } };
++    }
++  }
++
++  async matching() {
++    return (await all(this.table)).filter((r) => this.filters.every((f) => f(r)));
++  }
++
++  async exec() {
++    const t = this.table;
++    if (!TABLES.includes(t)) throw new Error(`Table ${t} is not available on this device.`);
++    if (this.op === 'select') {
++      let rows = await this.matching();
++      if (this.orderBy) {
++        const { c, asc } = this.orderBy;
++        rows.sort((a, b) => (a[c] === b[c] ? 0 : (a[c] > b[c] ? 1 : -1) * (asc ? 1 : -1)));
++      }
++      if (this.max != null) rows = rows.slice(0, this.max);
++      return rows.map((r) => pick(r, this.cols));
++    }
++    if (this.op === 'insert' || this.op === 'upsert') {
++      let rows = this.rows.map((r) => defaults(t, r));
++      if (t === 'studio_conversations' && this.op === 'insert') {
++        const existing = await all(t);
++        let n = existing.reduce((m, r) => Math.max(m, r.chat_no || 0), 0);
++        rows = rows.map((r) => ({ ...r, chat_no: r.chat_no ?? ++n }));
++      }
++      if (this.op === 'upsert') {
++        const key = t === 'studio_settings' ? 'owner' : 'id';
++        const existing = new Map((await all(t)).map((r) => [r[key], r]));
++        rows = rows.map((r) => ({ ...(existing.get(r[key]) || {}), ...r }));
++      }
++      await putMany(t, rows);
++      return this.returning ? rows.map((r) => pick(r, this.retCols)) : null;
++    }
++    if (this.op === 'update') {
++      const rows = (await this.matching()).map((r) => ({ ...r, ...this.patch }));
++      await putMany(t, rows);
++      return this.returning ? rows.map((r) => pick(r, this.retCols)) : null;
++    }
++    if (this.op === 'delete') {
++      const rows = await this.matching();
++      await delMany(t, rows.map((r) => (t === 'studio_settings' ? r.owner : r.id)));
++      if (t === 'studio_conversations' && rows.length) {
++        const ids = new Set(rows.map((r) => r.id));
++        const msgs = (await all('studio_messages')).filter((m) => ids.has(m.conversation_id));
++        await delMany('studio_messages', msgs.map((m) => m.id));
++      }
++      return null;
++    }
++    throw new Error('Unsupported request');
++  }
++}
++
++const storage = {
++  from() {
++    return {
++      async upload(path, blob) {
++        try {
++          const d = await idb();
++          const tx = d.transaction(FILES, 'readwrite');
++          tx.objectStore(FILES).put(blob, path);
++          await done(tx);
++          return { data: { path }, error: null };
++        } catch (e) { return { data: null, error: { message: e?.message || 'Could not save the file on this device.' } }; }
++      },
++      async download(path) {
++        try {
++          const d = await idb();
++          const b = await reqP(d.transaction(FILES).objectStore(FILES).get(path));
++          if (!b) return { data: null, error: { message: 'That file is not on this device.' } };
++          return { data: b, error: null };
++        } catch (e) { return { data: null, error: { message: e?.message || 'Could not read the file.' } }; }
++      },
++      async remove(paths) {
++        try { await delMany(FILES, paths); return { data: null, error: null }; } catch (e) { return { data: null, error: { message: e?.message } }; }
++      },
++    };
++  },
++};
++
++export const localDb = {
++  local: true,
++  from: (table) => new Query(table),
++  storage,
++  auth: {
++    getUser: async () => ({ data: { user: LOCAL_USER }, error: null }),
++    getSession: async () => ({ data: { session: { user: LOCAL_USER } }, error: null }),
++  },
++};
++
++// Opens the local store (and checks the browser allows it).
++export async function openLocal() {
++  await idb();
++  return localDb;
++}
++
++// A connection object for local mode. ref is used as a stable id (for example for the shared Gemini key).
++export const localConn = (user) => ({ ref: `local-${user?.id || 'device'}`, local: true });
++
++// True once this browser has chosen local mode, so later visits skip any setup screen.
++const LOCAL_KEY = 'studio:local';
++export const wantsLocal = () => { try { return localStorage.getItem(LOCAL_KEY) === '1'; } catch { return false; } };
++export const setWantsLocal = (on) => { try { if (on) localStorage.setItem(LOCAL_KEY, '1'); else localStorage.removeItem(LOCAL_KEY); } catch { /* private mode */ } };
++
++// Everything stored on this device, for copying into a Supabase project later.
++export async function exportLocal() {
++  const out = {};
++  for (const t of TABLES) out[t] = await all(t);
++  return out;
++}
+diff --git a/src/main.jsx b/src/main.jsx
+index 53a5113..a9be4c9 100644
+--- a/src/main.jsx
++++ b/src/main.jsx
+@@ -3,2 +3,3 @@ import { createRoot } from 'react-dom/client';
+ import App from './App';
++import ErrorBoundary from './components/ErrorBoundary';
+ import { loadPebble } from './lib/pebble';
+@@ -8,2 +9,2 @@ const root = createRoot(document.getElementById('root'));
+ // Pebble, the app's own typeface, is built in the browser first (about 50 ms) so the very first screen already uses it.
+-Promise.race([loadPebble(), new Promise((r) => setTimeout(r, 1500))]).finally(() => root.render(<App />));
++Promise.race([loadPebble(), new Promise((r) => setTimeout(r, 1500))]).finally(() => root.render(<ErrorBoundary><App /></ErrorBoundary>));

@@ -354,7 +354,7 @@ export async function runTask(t: any, deadline: number): Promise<string> {
     }
     const attempts = (t.attempts || 0) + 1;
     const msg = clip(e?.message || e, 400);
-    if (attempts >= 3 || e instanceof SoftFail && /No OpenRouter key/.test(msg)) {
+    if (attempts >= 3 || e instanceof SoftFail && /No (OpenRouter|API) key/.test(msg)) {
       await failTask(t, msg);
       return "failed";
     }
