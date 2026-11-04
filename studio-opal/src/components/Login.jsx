@@ -26,11 +26,24 @@ export default function Login({ initialError, onSignedIn }) {
   };
 
   return (
-    <div className='onboard'>
-      <div className='onboard-card'>
+    <div className='onboard auth'>
+      <aside className='showcase' aria-hidden='true'>
         <div className='brand'><Logo size={34} /><span>Studio</span></div>
-        <h1>Chat, and build workflows that work your way</h1>
-        <p className='lead'>Sign in to your studio. Chat with every model, run agents and build workflows, all in one place.</p>
+        <div className='showcase-body'>
+          <h2>Every model.<br /><em>One beautiful studio.</em></h2>
+          <p>Chat with Gemini, Claude and hundreds of models, hand big jobs to the Super Agent, and turn routines into workflows.</p>
+          <ul className='showcase-list'>
+            <li><span className='dot' />Bring your own keys for any provider</li>
+            <li><span className='dot' />Super Agent that plans, researches and checks its work</li>
+            <li><span className='dot' />Workflows that run on a schedule, even when you are away</li>
+          </ul>
+        </div>
+        <div className='showcase-glow' />
+      </aside>
+      <div className='onboard-card'>
+        <div className='brand mobile-only'><Logo size={34} /><span>Studio</span></div>
+        <h1>{tab === 'in' ? 'Welcome back' : 'Create your studio'}</h1>
+        <p className='lead'>{tab === 'in' ? 'Sign in to pick up where you left off.' : 'It takes a few seconds. No database setup needed.'}</p>
         <div className='tabs' role='tablist' aria-label='Sign in or create account'>
           <button role='tab' aria-selected={tab === 'in'} className={tab === 'in' ? 'on' : ''} onClick={() => { setTab('in'); setError(''); }}>Sign in</button>
           <button role='tab' aria-selected={tab === 'up'} className={tab === 'up' ? 'on' : ''} onClick={() => { setTab('up'); setError(''); }}>Create account</button>

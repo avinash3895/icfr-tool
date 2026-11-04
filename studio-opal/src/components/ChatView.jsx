@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Icon } from './Icons';
+import { Icon, Logo } from './Icons';
 import Composer from './Composer';
 import { byLabel, describeModel, generate, LimitError, matchOption, modelOptions, sourcesOf } from '../lib/ai';
 import { addMessage, createConversation, deleteMessagesFrom, listMessages, touchConversation } from '../lib/db';
@@ -13,10 +13,10 @@ import '../pills.css';
 const CHAT_PROMPT = 'You are a thoughtful, knowledgeable assistant. Lead with the direct answer, then add what is useful. Write in natural prose; use lists, tables or headers only when the content needs structure. Match length to the question. If the question is ambiguous, answer the most likely meaning. If you are unsure or something may be out of date, say so plainly instead of guessing.';
 
 const PILLS = [
-  { label: 'Summarize', text: 'Summarize this document' },
-  { label: 'Remind me', text: 'Remind me to follow up tomorrow at 9' },
-  { label: 'Build a workflow', text: 'Turn this spreadsheet into a weekly report' },
-  { label: 'Analyze data', text: 'Analyze this data and flag anything unusual' },
+  { label: 'Summarize', text: 'Summarize this document', icon: 'file', hint: 'Key points from any text or file' },
+  { label: 'Remind me', text: 'Remind me to follow up tomorrow at 9', icon: 'clock', hint: 'Set a reminder in plain words' },
+  { label: 'Build a workflow', text: 'Turn this spreadsheet into a weekly report', icon: 'flow', hint: 'Automate a repeat task' },
+  { label: 'Analyze data', text: 'Analyze this data and flag anything unusual', icon: 'chart', hint: 'Spot trends and outliers' },
 ];
 
 export default function ChatView({ db, conn, settings, convId, setConvId, refreshConvs, onNotice, onError, voice, name, project, onChatCreated, onAddMemory }) {
@@ -234,13 +234,23 @@ export default function ChatView({ db, conn, settings, convId, setConvId, refres
               <h1 className='hero'>{project.name}</h1>
               <div className='hint' style={{ marginTop: 8 }}>This chat uses the project&apos;s instructions{project.files?.length ? ` and ${project.files.length} file${project.files.length > 1 ? 's' : ''}` : ''}.</div>
             </div>
-          ) : <h1 className='hero'>{greeting()}, {name}</h1>}
+          ) : (
+            <div className='hero-wrap'>
+              <div className='hero-orb' aria-hidden='true'><Logo size={56} /></div>
+              <h1 className='hero'>{greeting()}, <em>{name}</em></h1>
+              <p className='hero-sub'>What would you like to create today?</p>
+            </div>
+          )}
           {memEl}
           {composer}
           {!project && (
-            <div className='pills'>
+            <div className='starters'>
               {PILLS.map((p) => (
-                <button key={p.label} type='button' className='pill' onClick={() => usePill(p.text)}>{p.label}</button>
+                <button key={p.label} type='button' className='starter' onClick={() => usePill(p.text)}>
+                  <span className='starter-ico'><Icon name={p.icon} size={18} /></span>
+                  <span className='starter-t'>{p.label}</span>
+                  <span className='starter-h'>{p.hint}</span>
+                </button>
               ))}
             </div>
           )}
@@ -275,6 +285,7 @@ export default function ChatView({ db, conn, settings, convId, setConvId, refres
             )
           ) : (
             <div key={m.id} className='msg-ai'>
+              <span className='ai-badge' aria-hidden='true'><Logo size={26} /></span>
               {m.meta?.error ? <div className='reply error'>{m.content}</div> : <div className='reply' dangerouslySetInnerHTML={{ __html: mdToHtml(m.content) }} />}
               {!!m.meta?.sources?.length && <div className='sources'>{m.meta.sources.map((s, i) => <a key={i} href={s.uri} target='_blank' rel='noreferrer'>{s.title}</a>)}</div>}
               {!m.meta?.error && (m.meta?.by || m.meta?.model) && <div className='by'>Answered by {m.meta.by || m.meta.model}{m.meta?.kb?.length ? ` · used ${m.meta.kb.join(', ')}` : ''}{m.meta?.auto ? ' · searched the web automatically' : ''}</div>}
@@ -295,7 +306,8 @@ export default function ChatView({ db, conn, settings, convId, setConvId, refres
             </div>
           )))}
           {running && (
-            <div className='msg-ai'>
+            <div className='msg-ai live'>
+              <span className='ai-badge' aria-hidden='true'><Logo size={26} /></span>
               {live ? <div className='reply' dangerouslySetInnerHTML={{ __html: mdToHtml(live) }} /> : <div className='thinking'><i /><i /><i /> {status || 'Thinking'}</div>}
             </div>
           )}
