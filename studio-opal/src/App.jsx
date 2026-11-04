@@ -23,6 +23,7 @@ import { errText } from './lib/util';
 import { localConn, openLocal, setWantsLocal, wantsLocal } from './lib/localdb';
 import ErrorBoundary from './components/ErrorBoundary';
 import './theme.css';
+import './fiesta.css';
 
 const NAV = [
   { id: 'chat', label: 'Chats', icon: 'chat' },
@@ -422,7 +423,7 @@ export default function App() {
         {error && <div className='banner error'><span>{error}</span><button className='btn small' onClick={() => setError('')}>Dismiss</button></div>}
         {notice && <div className='banner note'><span>{notice}</span><button className='btn small' onClick={() => setNotice('')}>Dismiss</button></div>}
 
-        <ErrorBoundary key={mode + ':' + (convId || '') + ':' + (agentId || '')} onError={setError}>
+        <ErrorBoundary key={mode}>
         {mode === 'chat' && <ChatView key={`${conn.ref}:chat`} db={db} conn={conn} settings={settings} convId={convId} setConvId={setConvId} refreshConvs={refreshConvs} onNotice={setNotice} onError={setError} voice={voice} name={name} onAddMemory={addMemory} />}
         {mode === 'projects' && project && projChat && (
           <>
