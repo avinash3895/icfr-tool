@@ -1,0 +1,11 @@
+/* Agent chats */
+html .chat-switch{display:inline-flex;align-items:center;gap:6px;max-width:min(46vw,260px);min-height:34px;padding:0 12px;border:1px solid var(--line2);border-radius:10px;background:var(--surface);font-size:13.5px;font-weight:600;color:var(--ink)}
+html .chat-switch span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+html .chat-switch:hover{border-color:var(--accent)}
+html .chat-list{gap:4px}
+html .chat-row{display:flex;align-items:center;gap:4px;padding:2px 4px 2px 2px;border-radius:12px}
+html .chat-row:hover{background:var(--surface2)}
+html .chat-row.on{background:var(--soft)}
+html .chat-go{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:8px 10px;border:none;background:transparent;text-align:left}
+html .chat-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14.5px;font-weight:600}
+html .icon-btn.danger{color:var(--danger)}
