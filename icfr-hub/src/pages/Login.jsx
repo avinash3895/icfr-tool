@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { sb } from '../lib/api';
+import { Logo } from '../components/ui';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -39,11 +40,28 @@ export default function Login() {
 
   return (
     <div className="login-page">
+      <section className="login-art" aria-hidden="true">
+        <div className="brand"><Logo /><span>ICFR Hub</span></div>
+        <div className="login-sheet">
+          <h2>Procure to Pay, Q3 testing</h2>
+          <table>
+            <tbody>
+              <tr><td>P2P-01</td><td>Three-way match before payment</td><td className="tick">✓</td></tr>
+              <tr><td>P2P-02</td><td>Vendor master changes reviewed</td><td className="tick">✓</td></tr>
+              <tr><td>P2P-03</td><td><span className="hl">Payment run approval</span></td><td className="x">✗ 1</td></tr>
+              <tr><td>P2P-04</td><td>Accrual for goods not invoiced</td><td className="tick">✓</td></tr>
+            </tbody>
+          </table>
+          <div className="stamp ok"><span className="stamp-word">Signed off</span><span className="stamp-date">Finance</span></div>
+        </div>
+        <p className="login-claim">Every control, every entity, tested and signed off in one place.</p>
+      </section>
+      <div className="login-form-side">
       <form className="login-card" onSubmit={submit}>
-        <div className="brand big"><span className="logo">✓</span><span>ICFR Hub</span></div>
+        <h1>{setup ? 'Set up ICFR Hub' : 'Sign in'}</h1>
         {setup
           ? <p className="muted">Create the first admin account. You will manage entities, processes, users and sign-offs. If this email already has a login on this server, use its current password.</p>
-          : <p className="muted">Internal controls over financial reporting – RCMs, walkthroughs, testing and sign-offs for every entity.</p>}
+          : <p className="muted">RCMs, walkthroughs, testing and sign-offs for every entity.</p>}
         {setup && (
           <div className="field">
             <label htmlFor="name">Your name</label>
@@ -62,13 +80,14 @@ export default function Login() {
         <button className="btn primary full" disabled={busy}>{busy ? 'Please wait…' : setup ? 'Create admin and sign in' : 'Sign in'}</button>
         {needsAdmin && (
           <p className="small center-text">
-            <button type="button" className="link" onClick={() => { setSetup((s) => !s); setErr(''); }}>
+            <button type="button" className="link" onClick={() => { setSetup((x) => !x); setErr(''); }}>
               {setup ? 'Back to sign in' : 'First time here? Set up ICFR Hub'}
             </button>
           </p>
         )}
-        {!needsAdmin && <p className="muted small">No account yet? Ask your ICFR admin to create one.</p>}
+        {!needsAdmin && <p className="muted small center-text">No account yet? Ask your ICFR admin to create one.</p>}
       </form>
+      </div>
     </div>
   );
 }

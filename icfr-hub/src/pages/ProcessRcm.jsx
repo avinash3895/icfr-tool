@@ -132,9 +132,7 @@ export default function ProcessRcm({ entity, processId, fy, processes }) {
         <div>
           <h1><span className="pcode big">{process.code}</span> {process.name}</h1>
           <p className="muted">
-            Risk and control matrix
-            {(process.owner_name || process.owner_email) && <> · Owner: {process.owner_name || process.owner_email}</>}
-            {!isStaff && <> · view only</>}
+            Risk and control matrix{(process.owner_name || process.owner_email) && <>, owned by {process.owner_name || process.owner_email}</>}{!isStaff && <> (view only)</>}
           </p>
         </div>
         <div className="actions">

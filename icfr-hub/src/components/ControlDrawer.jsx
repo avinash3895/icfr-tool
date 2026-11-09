@@ -51,7 +51,7 @@ export default function ControlDrawer({ entity, process, columns, controlId, fy,
   };
 
   return (
-    <Drawer title={control.control_ref} subtitle={`${process.name}${control.archived ? ' · removed' : ''}`} onClose={onClose}>
+    <Drawer title={control.control_ref} subtitle={`${process.name}${control.archived ? ' (removed)' : ''}`} onClose={onClose}>
       <Tabs value={tab} onChange={setTab} tabs={[
         { id: 'details', label: 'RCM details' },
         { id: 'testing', label: `Testing ${fyLabel(fy, entity.fy_end_month)}` },

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { useApp, useLoad } from '../lib/app';
+import { useState, useEffect, useContext } from 'react';
+import { createPortal } from 'react-dom';
+import { RailSlotCtx, useApp, useLoad } from '../lib/app';
 import { listProcesses } from '../lib/api';
 import { currentFY, fyLabel } from '../lib/util';
 import { Spinner, ErrorBox, Empty } from '../components/ui';
@@ -10,7 +11,8 @@ import TemplateEditor from './TemplateEditor';
 import Testing from './Testing';
 import Activity from './Activity';
 
-export default function EntityPage({ entityId, rest, menuOpen }) {
+export default function EntityPage({ entityId, rest }) {
+  const slot = useContext(RailSlotCtx);
   const { entities } = useApp();
   const entity = entities.find((e) => e.id === entityId);
   const procs = useLoad(() => listProcesses(entityId), [entityId]);
@@ -45,39 +47,37 @@ export default function EntityPage({ entityId, rest, menuOpen }) {
 
   const link = (path, label, on) => <a href={`#/e/${entityId}${path}`} className={on ? 'on' : ''}>{label}</a>;
 
-  return (
-    <div className="entity-layout">
-      <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
-        <div className="sb-entity">
-          <div className="sb-code">{entity.code}</div>
-          <div className="sb-name">{entity.name}</div>
-          <label className="sb-fy">
-            <span>Fiscal year</span>
-            <select value={fy} onChange={(e) => setFy(Number(e.target.value))}>
-              {years.map((y) => <option key={y} value={y}>{fyLabel(y, entity.fy_end_month)}</option>)}
-            </select>
-          </label>
-        </div>
-        <nav className="sb-nav">
-          {link('', 'Dashboard', !section)}
-          {link('/processes', 'Processes', section === 'processes')}
-          {link('/testing', 'Walkthroughs & testing', section === 'testing')}
-          {link('/activity', 'Uploads & activity', section === 'activity')}
-        </nav>
-        <div className="sb-title">Processes</div>
-        <nav className="sb-nav sb-procs">
-          {processes.map((p) => (
-            <a key={p.id} href={`#/e/${entityId}/p/${p.id}`} className={pid === p.id ? 'on' : ''} title={p.name}>
-              <span className="pcode">{p.code}</span>{p.name}
-            </a>
-          ))}
-          {!processes.length && <div className="muted small pad">No processes yet</div>}
-        </nav>
-      </aside>
-      <main className="entity-main">
-        <ErrorBox error={procs.error} />
-        {body}
-      </main>
+  const railContent = (
+    <div className="rail-entity">
+      <label className="rail-switch">
+        <span>Fiscal year</span>
+        <select value={fy} onChange={(e) => setFy(Number(e.target.value))}>
+          {years.map((y) => <option key={y} value={y}>{fyLabel(y, entity.fy_end_month)}</option>)}
+        </select>
+      </label>
+      <nav className="rail-nav sub">
+        {link('', 'Dashboard', !section)}
+        {link('/processes', 'Processes', section === 'processes')}
+        {link('/testing', 'Walkthroughs & testing', section === 'testing')}
+        {link('/activity', 'Uploads & activity', section === 'activity')}
+      </nav>
+      <div className="rail-heading">Process binders</div>
+      <nav className="rail-tabs">
+        {processes.map((p, i) => (
+          <a key={p.id} href={`#/e/${entityId}/p/${p.id}`} className={pid === p.id ? 'on' : ''} title={p.name} style={{ '--tab': `var(--tab-${i % 6})` }}>
+            <span className="tab-code">{p.code}</span><span className="tab-name">{p.name}</span>
+          </a>
+        ))}
+        {!processes.length && <div className="rail-empty">No processes yet</div>}
+      </nav>
     </div>
+  );
+
+  return (
+    <>
+      {slot && createPortal(railContent, slot)}
+      <ErrorBox error={procs.error} />
+      {body}
+    </>
   );
 }

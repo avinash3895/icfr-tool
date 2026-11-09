@@ -53,7 +53,7 @@ export default function Home() {
               <span className="ec-fy">{fyLabel(fy, e.fy_end_month)}</span>
             </div>
             <div className="ec-name">{e.name}</div>
-            <div className="muted small">{[e.country, e.currency].filter(Boolean).join(' · ') || ' '}</div>
+            <div className="muted small">{[e.country, e.currency].filter(Boolean).join(', ') || ' '}</div>
             {loading && <Spinner />}
             {s && (
               <>

@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { sb, configured, getProfile, listEntities, listGrants } from './lib/api';
-import { AppCtx, useApp, useHashRoute, go } from './lib/app';
+import { AppCtx, RailSlotCtx, useApp, useHashRoute, go } from './lib/app';
 import { ROLES } from './lib/util';
-import { ToastHost, Spinner } from './components/ui';
+import { ToastHost, Spinner, Logo } from './components/ui';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import EntityPage from './pages/EntityPage';
@@ -97,20 +97,28 @@ function Root() {
 function Shell() {
   const parts = useHashRoute();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [slot, setSlot] = useState(null);
   useEffect(() => setMenuOpen(false), [parts.join('/')]);
   return (
-    <div className="shell">
-      <TopBar onMenu={() => setMenuOpen((o) => !o)} />
-      <div className="shell-body">
-        <Page parts={parts} menuOpen={menuOpen} />
+    <RailSlotCtx.Provider value={slot}>
+      <div className={`app ${menuOpen ? 'menu-open' : ''}`}>
+        <Rail setSlot={setSlot} onClose={() => setMenuOpen(false)} />
+        <div className="scrim" onClick={() => setMenuOpen(false)} />
+        <div className="main">
+          <header className="mobilebar">
+            <button className="icon-btn" onClick={() => setMenuOpen(true)} aria-label="Open menu">☰</button>
+            <a className="brand" href="#/"><Logo /><span>ICFR Hub</span></a>
+          </header>
+          <Page parts={parts} />
+        </div>
       </div>
-    </div>
+    </RailSlotCtx.Provider>
   );
 }
 
-function Page({ parts, menuOpen }) {
+function Page({ parts }) {
   const [a, b] = parts;
-  if (a === 'e' && b) return <EntityPage key={b} entityId={b} rest={parts.slice(2)} menuOpen={menuOpen} />;
+  if (a === 'e' && b) return <EntityPage key={b} entityId={b} rest={parts.slice(2)} />;
   if (a === 'tasks') return <Tasks />;
   if (a === 'admin' && b === 'entities') return <AdminEntities />;
   if (a === 'admin' && b === 'users') return <AdminUsers />;
@@ -119,48 +127,48 @@ function Page({ parts, menuOpen }) {
   return <Home />;
 }
 
-function TopBar({ onMenu }) {
+function Rail({ setSlot, onClose }) {
   const { profile, isAdmin, entities } = useApp();
   const parts = useHashRoute();
-  const ent = parts[0] === 'e' ? entities.find((e) => e.id === parts[1]) : null;
+  const inEntity = parts[0] === 'e';
   const [open, setOpen] = useState(false);
   return (
-    <header className="topbar">
-      {ent && <button className="icon-btn menu-btn" onClick={onMenu} aria-label="Menu">☰</button>}
-      <a className="brand" href="#/">
-        <span className="logo">✓</span>
-        <span>ICFR Hub</span>
-      </a>
-      {ent && (
-        <div className="crumb">
-          <span className="sep">/</span>
-          <select className="entity-switch" value={ent.id} onChange={(e) => go(`/e/${e.target.value}`)}>
-            {entities.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
-        </div>
-      )}
-      <nav className="topnav">
+    <aside className="rail">
+      <div className="rail-top">
+        <a className="brand" href="#/"><Logo /><span>ICFR Hub</span></a>
+        <button className="icon-btn rail-close" onClick={onClose} aria-label="Close menu">×</button>
+      </div>
+      <nav className="rail-nav">
         <a href="#/" className={!parts.length ? 'on' : ''}>Entities</a>
         <a href="#/tasks" className={parts[0] === 'tasks' ? 'on' : ''}>My tasks</a>
         {isAdmin && <a href="#/admin/entities" className={parts[0] === 'admin' ? 'on' : ''}>Setup</a>}
       </nav>
-      <div className="user-menu">
-        <button className="user-btn" onClick={() => setOpen((o) => !o)}>
+      {inEntity && entities.length > 0 && (
+        <label className="rail-switch">
+          <span>Entity</span>
+          <select value={parts[1]} onChange={(e) => go(`/e/${e.target.value}`)}>
+            {entities.map((x) => <option key={x.id} value={x.id}>{x.code} – {x.name}</option>)}
+          </select>
+        </label>
+      )}
+      <div className="rail-slot" ref={setSlot} />
+      <div className="rail-user">
+        <button className="user-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
           <span className="avatar">{(profile.full_name || profile.email)[0].toUpperCase()}</span>
-          <span className="user-name">{profile.full_name || profile.email}</span>
+          <span className="user-text">
+            <span className="user-name">{profile.full_name || profile.email}</span>
+            <span className="user-role">{ROLES[profile.role]}</span>
+          </span>
         </button>
         {open && (
           <div className="menu" onMouseLeave={() => setOpen(false)}>
-            <div className="menu-head">
-              <div>{profile.email}</div>
-              <div className="muted small">{ROLES[profile.role]}</div>
-            </div>
+            <div className="menu-head">{profile.email}</div>
             <a href="#/account" onClick={() => setOpen(false)}>My account</a>
             <button onClick={() => sb.auth.signOut()}>Sign out</button>
           </div>
         )}
       </div>
-    </header>
+    </aside>
   );
 }
 

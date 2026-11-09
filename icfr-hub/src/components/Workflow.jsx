@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp, useLoad, rightsOn, wfButtons } from '../lib/app';
 import { wfAction, listEvents, auditFor, listAttachments, uploadAttachment, downloadAttachment, deleteAttachment } from '../lib/api';
 import { fmtDateTime, STATUS, auditValue, auditChanges } from '../lib/util';
-import { Badge, PromptModal, useToast, Spinner } from './ui';
+import { Badge, Stamp, PromptModal, useToast, Spinner } from './ui';
 import { actionText } from '../pages/Dashboard';
 
 const LABEL = { submit: 'Submit for sign-off', approve: 'Sign off', return: 'Send back', reopen: 'Reopen / send back' };
@@ -30,6 +30,7 @@ export function WorkflowBar({ type, record, control, onDone, beforeSubmit }) {
 
   return (
     <div className="wf-bar">
+      <Stamp status={record.status} date={record.status === 'approved' ? fmtDateTime(record.finance_at).split(',')[0] : null} />
       <div className="wf-steps">
         <Step label="Prepared" done={!!record.submitted_at} who={record.submitted_at} active={['draft', 'returned'].includes(record.status)} />
         <Step label="Manager" done={!!record.manager_at} who={record.manager_at} active={record.status === 'pending_manager'} skipped={!!record.submitted_at && !record.manager_at && ['pending_finance', 'approved'].includes(record.status)} />

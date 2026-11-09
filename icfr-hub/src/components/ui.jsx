@@ -1,9 +1,29 @@
 import { useEffect, useState, createContext, useContext, useCallback } from 'react';
 import { STATUS, emailsToText } from '../lib/util';
 
+// Auditor tick marks for sign-off status
+const MARK = { draft: '○', pending_manager: '◔', pending_finance: '◑', approved: '✓', returned: '✗' };
+
 export function Badge({ status, children, tone }) {
   const s = STATUS[status];
-  return <span className={`badge tone-${tone || s?.tone || 'grey'}`}>{children || s?.label || status}</span>;
+  const mark = !children && MARK[status];
+  return (
+    <span className={`badge tone-${tone || s?.tone || 'grey'}`}>
+      {mark && <i className="mark" aria-hidden="true">{mark}</i>}
+      {children || s?.label || status}
+    </span>
+  );
+}
+
+// Inked stamp shown on signed-off or sent-back records
+export function Stamp({ status, date }) {
+  if (status !== 'approved' && status !== 'returned') return null;
+  return (
+    <div className={`stamp ${status === 'approved' ? 'ok' : 'back'}`} aria-label={status === 'approved' ? 'Signed off' : 'Sent back'}>
+      <span className="stamp-word">{status === 'approved' ? 'Signed off' : 'Sent back'}</span>
+      {date && <span className="stamp-date">{date}</span>}
+    </div>
+  );
 }
 
 export function ConclusionBadge({ value }) {
@@ -219,3 +239,13 @@ export function PromptModal({ title, label, placeholder, required, confirmLabel 
     </Modal>
   );
 }
+
+export function Logo() {
+  return (
+    <svg className="logo" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="8" fill="var(--logo-bg)" />
+      <path d="M8.5 16.8l4.6 4.7L23.8 10" stroke="var(--logo-tick)" strokeWidth="3.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+

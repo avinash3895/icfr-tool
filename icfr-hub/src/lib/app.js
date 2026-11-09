@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
 export const AppCtx = createContext(null);
+// the sidebar area that entity pages fill with their own navigation
+export const RailSlotCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
 
 // Tiny hash router: #/e/<id>/p/<pid>  ->  ['e', id, 'p', pid]

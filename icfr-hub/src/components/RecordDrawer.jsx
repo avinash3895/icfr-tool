@@ -52,10 +52,10 @@ export default function RecordDrawer({ entity, process, control: ctl, kind, reco
     } catch (e) { toast.err(e); throw e; } finally { setBusy(false); }
   };
 
-  const title = kind === 'walkthrough' ? `Walkthrough · ${control.control_ref}` : `Test ${rec.period} · ${control.control_ref}`;
+  const title = kind === 'walkthrough' ? `${control.control_ref} walkthrough` : `${control.control_ref} ${rec.period} test`;
   const sub = kind === 'walkthrough'
-    ? `${process?.name || ''} · ${fyLabel(rec.fy, entity?.fy_end_month)}`
-    : `${process?.name || ''} · ${fmtDate(rec.period_start)} – ${fmtDate(rec.period_end)}`;
+    ? `${process?.name || ''}, ${fyLabel(rec.fy, entity?.fy_end_month)}`
+    : `${process?.name || ''}, ${fmtDate(rec.period_start)} to ${fmtDate(rec.period_end)}`;
 
   return (
     <Drawer title={title} subtitle={sub} onClose={onClose}

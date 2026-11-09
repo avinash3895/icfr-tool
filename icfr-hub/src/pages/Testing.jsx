@@ -153,7 +153,7 @@ export default function Testing({ entity, processes, fy }) {
       <div className="page-head">
         <div>
           <h1>Walkthroughs &amp; testing</h1>
-          <p className="muted">{fyLabel(fy, entity.fy_end_month)} · fill the sheet, then submit each row for sign-off (manager → finance).</p>
+          <p className="muted">{fyLabel(fy, entity.fy_end_month)}. Fill the sheet, then submit each row; it goes to the manager, then to finance.</p>
         </div>
         <div className="actions">
           {(data.walkthroughs.length > 0 || data.tests.length > 0) && procObj && (

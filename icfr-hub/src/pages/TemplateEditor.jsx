@@ -59,7 +59,7 @@ export default function TemplateEditor({ entity, processId, processes, reloadPro
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Edit process · {data.process.name}</h1>
+          <h1>Edit {data.process.name}</h1>
           <p className="muted">Changes apply on screen and to Excel files downloaded from now on.</p>
         </div>
         <div className="actions">

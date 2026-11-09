@@ -52,7 +52,7 @@ export default function Dashboard({ entity, processes, fy }) {
       <div className="page-head">
         <div>
           <h1>{entity.name}</h1>
-          <p className="muted">Dashboard · {fyLabel(fy, entity.fy_end_month)}</p>
+          <p className="muted">Dashboard for {fyLabel(fy, entity.fy_end_month)}</p>
         </div>
         {isStaff && data.controls.length > 0 && unplanned > 0 && (
           <button className="btn primary" disabled={busy} onClick={setUp}>
@@ -132,8 +132,8 @@ export default function Dashboard({ entity, processes, fy }) {
                     <Progress parts={statusParts(p.status)} />
                     <div className="small muted">
                       {p.status.approved || 0} of {p.total} signed off
-                      {p.ineffective > 0 && <span className="tone-text-red"> · {p.ineffective} ineffective</span>}
-                      {p.exceptions > 0 && <span className="tone-text-amber"> · {p.exceptions} with exceptions</span>}
+                      {p.ineffective > 0 && <span className="tone-text-red">, {p.ineffective} ineffective</span>}
+                      {p.exceptions > 0 && <span className="tone-text-amber">, {p.exceptions} with exceptions</span>}
                     </div>
                   </div>
                 );
