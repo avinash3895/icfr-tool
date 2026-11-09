@@ -1,0 +1,102 @@
+import { useState } from 'react';
+import { useApp, useLoad } from '../lib/app';
+import { listUploads, auditForEntity, recentEvents, downloadUploadedFile, listProfiles, listControls, listWalkthroughs, listTests } from '../lib/api';
+import { fmtDateTime, auditValue, auditChanges } from '../lib/util';
+import { Spinner, ErrorBox, Tabs, Empty, useToast } from '../components/ui';
+import { actionText } from './Dashboard';
+
+const TABLES = { controls: 'Control', walkthroughs: 'Walkthrough', tests: 'Test', processes: 'Process', process_columns: 'Template column', entities: 'Entity', access_grants: 'Access', attachments: 'File' };
+const HIDE = new Set(['data', 'created_at', 'updated_at', 'updated_by', 'submitted_by', 'manager_by', 'finance_by', 'responsible_emails', 'manager_emails', 'is_key', 'frequency', 'test_frequency', 'control_ref']);
+
+export default function Activity({ entity, processes }) {
+  const { isStaff } = useApp();
+  const toast = useToast();
+  const [tab, setTab] = useState('uploads');
+  const { data, loading, error } = useLoad(async () => {
+    const [uploads, audit, events, people, controls, walks, tests] = await Promise.all([
+      listUploads(entity.id),
+      isStaff ? auditForEntity(entity.id, 300) : Promise.resolve([]),
+      recentEvents(entity.id, 200),
+      listProfiles(),
+      listControls({ entityId: entity.id, includeArchived: true }),
+      isStaff ? listWalkthroughs({ entityId: entity.id }) : Promise.resolve([]),
+      isStaff ? listTests({ entityId: entity.id }) : Promise.resolve([]),
+    ]);
+    // record id -> readable name
+    const names = new Map();
+    const ref = new Map(controls.map((c) => [c.id, c.control_ref]));
+    controls.forEach((c) => names.set(c.id, c.control_ref));
+    walks.forEach((w) => names.set(w.id, `${ref.get(w.control_id) || ''} (FY${w.fy})`));
+    tests.forEach((t) => names.set(t.id, `${ref.get(t.control_id) || ''} ${t.period} (FY${t.fy})`));
+    return { uploads, audit, events, people, names };
+  }, [entity.id]);
+
+  if (loading && !data) return <Spinner />;
+  if (error) return <ErrorBox error={error} />;
+  const who = (id) => data.people.find((p) => p.id === id)?.email || '—';
+  const pname = (id) => processes.find((p) => p.id === id)?.name || '—';
+
+  const tabs = [
+    { id: 'uploads', label: 'Excel uploads', count: data.uploads.length },
+    { id: 'signoffs', label: 'Sign-offs', count: data.events.length },
+    ...(isStaff ? [{ id: 'audit', label: 'Audit trail' }] : []),
+  ];
+
+  return (
+    <div className="page">
+      <h1>Uploads &amp; activity</h1>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      {tab === 'uploads' && (!data.uploads.length ? <Empty title="No uploads yet" /> : (
+        <table className="table">
+          <thead><tr><th>When</th><th>Who</th><th>Process</th><th>File</th><th>Result</th></tr></thead>
+          <tbody>
+            {data.uploads.map((u) => (
+              <tr key={u.id}>
+                <td>{fmtDateTime(u.uploaded_at)}</td><td>{who(u.uploaded_by)}</td><td>{pname(u.process_id)}</td>
+                <td>{u.path ? <button className="link" onClick={() => downloadUploadedFile(u).catch(toast.err)}>{u.file_name}</button> : u.file_name}</td>
+                <td>{u.summary ? `${u.summary.added} added, ${u.summary.updated} updated` : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ))}
+      {tab === 'signoffs' && (!data.events.length ? <Empty title="No sign-offs yet" /> : (
+        <ul className="activity big">
+          {data.events.map((e) => (
+            <li key={e.id}>
+              <span className="muted small">{fmtDateTime(e.at)}</span>
+              <span><b>{e.actor_email}</b> {actionText(e)} a {e.record_type}{e.comment && <> – <i>“{e.comment}”</i></>}</span>
+            </li>
+          ))}
+        </ul>
+      ))}
+      {tab === 'audit' && (
+        <>
+          <p className="small muted">Last 300 changes in this entity. Every field change, by whom and when.</p>
+          <table className="table compact">
+            <thead><tr><th>When</th><th>Who</th><th>What</th><th>Change</th></tr></thead>
+            <tbody>
+              {data.audit.map((a) => {
+                const ch = a.action === 'update' ? auditChanges(a.changed, HIDE) : [];
+                if (a.action === 'update' && !ch.length) return null;
+                const name = data.names.get(a.record_id) || a.changed?.control_ref || a.changed?.name?.to || a.changed?.name || a.changed?.label?.to || a.changed?.label || a.changed?.file_name || '';
+                return (
+                  <tr key={a.id}>
+                    <td className="nowrap">{fmtDateTime(a.at)}</td>
+                    <td>{a.actor_email || 'system'}</td>
+                    <td>{TABLES[a.table_name] || a.table_name} {typeof name === 'string' ? name : ''}</td>
+                    <td>
+                      {a.action === 'insert' && 'Created'}
+                      {a.action === 'delete' && 'Deleted'}
+                      {ch.map(([k, v]) => <div key={k} className="diff"><b>{k.replace(/_/g, ' ')}</b>: <s>{auditValue(k, v.from)}</s> → {auditValue(k, v.to)}</div>)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
