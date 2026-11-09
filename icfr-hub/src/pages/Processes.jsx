@@ -49,11 +49,11 @@ export default function Processes({ entity, processes, reloadProcesses }) {
       )}
 
       <div className="proc-grid">
-        {processes.map((p) => (
-          <div key={p.id} className="proc-card">
+        {processes.map((p, i) => (
+          <div key={p.id} className="proc-card" style={{ '--tab': `var(--tab-${i % 6})` }}>
             <div className="proc-top">
               <span className="pcode">{p.code}</span>
-              <span className="muted small">{counts.data?.[p.id] || 0} controls</span>
+              <span className="muted small">{counts.data?.[p.id] || 0} control{counts.data?.[p.id] === 1 ? '' : 's'}</span>
             </div>
             <a className="proc-name" href={`#/e/${entity.id}/p/${p.id}`}>{p.name}</a>
             {p.description && <p className="small muted clamp">{p.description}</p>}

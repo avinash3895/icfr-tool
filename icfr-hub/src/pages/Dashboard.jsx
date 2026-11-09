@@ -87,6 +87,8 @@ export default function Dashboard({ entity, processes, fy }) {
             <Stat label="Controls without owner" value={s.noOwner} tone={s.noOwner ? 'amber' : null} />
           </div>
 
+          <TestingBoard entity={entity} processes={processes} data={data} today={today} periods={periods} />
+
           <div className="card">
             <h3>Processes</h3>
             <div className="table-wrap">
@@ -193,6 +195,66 @@ export function Legend() {
       {['approved', 'pending_finance', 'pending_manager', 'returned', 'draft'].map((k) => (
         <span key={k}><i className={`dot tone-${STATUS[k].tone}`} />{STATUS[k].label}</span>
       ))}
+    </div>
+  );
+}
+
+// Processes x (walkthrough + test periods), one tick-mark cell each
+function TestingBoard({ entity, processes, data, today, periods }) {
+  if (!data.walkthroughs.length && !data.tests.length) return null;
+  const active = new Set(data.controls.map((c) => c.id));
+  const cols = [{ key: 'walk', label: 'Walkthrough' }, ...periods.map((p) => ({ key: p.period, label: p.period, start: p.start, end: p.end }))];
+  const cell = (pid, col) => {
+    const list = col.key === 'walk'
+      ? data.walkthroughs.filter((w) => w.process_id === pid && active.has(w.control_id))
+      : data.tests.filter((t) => t.process_id === pid && t.period === col.key && active.has(t.control_id));
+    if (!list.length) return { state: 'none' };
+    const done = list.filter((x) => x.status === 'approved').length;
+    const bad = list.filter((x) => x.conclusion === 'Ineffective').length;
+    const ended = col.key !== 'walk' && list[0].period_end < today;
+    const future = col.key !== 'walk' && list[0].period_start > today;
+    const state = bad ? 'bad' : done === list.length ? 'done' : future ? 'future' : ended ? 'late' : 'open';
+    return { state, done, total: list.length, bad };
+  };
+  const mark = { done: '✓', bad: '✗', late: '!', open: '→', future: '–', none: '' };
+  return (
+    <div className="card board">
+      <div className="board-head">
+        <h3>Testing board</h3>
+        <div className="legend">
+          <span><i className="board-key done">✓</i>All signed off</span>
+          <span><i className="board-key open">→</i>In progress</span>
+          <span><i className="board-key late">!</i>Overdue</span>
+          <span><i className="board-key bad">✗</i>Ineffective</span>
+          <span><i className="board-key future">–</i>Not started</span>
+        </div>
+      </div>
+      <div className="table-wrap flat">
+        <table className="board-table">
+          <thead>
+            <tr><th>Process</th>{cols.map((c) => <th key={c.key} title={c.start ? `${c.start} to ${c.end}` : ''}>{c.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {processes.map((p, i) => (
+              <tr key={p.id}>
+                <th><a href={`#/e/${entity.id}/p/${p.id}`}><span className="pcode" style={{ background: `var(--tab-${i % 6})` }}>{p.code}</span>{p.name}</a></th>
+                {cols.map((c) => {
+                  const x = cell(p.id, c);
+                  return (
+                    <td key={c.key}>
+                      {x.state !== 'none' && (
+                        <a className={`board-cell ${x.state}`} href={`#/e/${entity.id}/testing`} title={`${x.done} of ${x.total} signed off${x.bad ? `, ${x.bad} ineffective` : ''}`}>
+                          <i>{mark[x.state]}</i><span>{x.done}/{x.total}</span>
+                        </a>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

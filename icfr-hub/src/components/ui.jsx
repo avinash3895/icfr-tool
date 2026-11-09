@@ -2,7 +2,7 @@ import { useEffect, useState, createContext, useContext, useCallback } from 'rea
 import { STATUS, emailsToText } from '../lib/util';
 
 // Auditor tick marks for sign-off status
-const MARK = { draft: '○', pending_manager: '◔', pending_finance: '◑', approved: '✓', returned: '✗' };
+const MARK = { draft: '○', pending_manager: '→', pending_finance: '⇒', approved: '✓', returned: '✗' };
 
 export function Badge({ status, children, tone }) {
   const s = STATUS[status];

@@ -55,7 +55,9 @@ export default function Activity({ entity, processes }) {
               <tr key={u.id}>
                 <td>{fmtDateTime(u.uploaded_at)}</td><td>{who(u.uploaded_by)}</td><td>{pname(u.process_id)}</td>
                 <td>{u.path ? <button className="link" onClick={() => downloadUploadedFile(u).catch(toast.err)}>{u.file_name}</button> : u.file_name}</td>
-                <td>{u.summary ? `${u.summary.added} added, ${u.summary.updated} updated${u.summary.renumbered ? ` (${u.summary.renumbered} renumbered)` : ''}${u.summary.archived ? `, ${u.summary.archived} removed` : ''}` : ''}</td>
+                <td>{!u.summary ? '' : u.summary.kind === 'testing'
+                  ? `Testing: ${u.summary.walkthroughs} walkthrough${u.summary.walkthroughs === 1 ? '' : 's'}, ${u.summary.tests} test${u.summary.tests === 1 ? '' : 's'} updated`
+                  : `RCM: ${u.summary.added} added, ${u.summary.updated} updated${u.summary.renumbered ? ` (${u.summary.renumbered} renumbered)` : ''}${u.summary.archived ? `, ${u.summary.archived} removed` : ''}`}</td>
               </tr>
             ))}
           </tbody>
