@@ -5,6 +5,8 @@ import { STATUS, fmtDate, fyLabel, todayISO, periodSort, normalizeValue } from '
 import { Spinner, ErrorBox, Badge, Empty, PromptModal, useToast } from '../components/ui';
 import SheetGrid from '../components/SheetGrid';
 import RecordDrawer from '../components/RecordDrawer';
+import TestingUploadFlow from '../components/TestingUploadFlow';
+import { downloadTesting } from '../lib/testingExcel';
 
 export default function Testing({ entity, processes, fy }) {
   const { profile, isStaff } = useApp();
@@ -19,6 +21,7 @@ export default function Testing({ entity, processes, fy }) {
   const [edits, setEdits] = useState({});
   const [errors, setErrors] = useState({});
   const [returning, setReturning] = useState(null);
+  const [uploading, setUploading] = useState(null);
 
   const { data, loading, error, reload } = useLoad(async () => {
     const [controls, walkthroughs, tests] = await Promise.all([
@@ -69,6 +72,26 @@ export default function Testing({ entity, processes, fy }) {
       reload();
     } catch (e) { toast.err(e); }
     setBusy(false);
+  };
+
+  const templates = async () => {
+    const [w, t] = await Promise.all([listColumns(proc, false, 'walkthrough'), listColumns(proc, false, 'test')]);
+    return { walkthrough: w, test: t };
+  };
+  const forProc = () => ({
+    walkthroughs: data.walkthroughs.filter((w) => w.process_id === proc),
+    tests: data.tests.filter((t) => t.process_id === proc),
+  });
+  const downloadXlsx = async () => {
+    setBusy(true);
+    try {
+      await downloadTesting({ entity, process: procObj, fy, fyText: fyLabel(fy, entity.fy_end_month), ...forProc(), controls: data.byId, columns: await templates(), isAdmin: isStaff });
+    } catch (e) { toast.err(e); }
+    setBusy(false);
+  };
+  const openUpload = async () => {
+    if (dirtyCount) return toast.err('Save or discard your changes on the sheet first.');
+    try { setUploading({ columns: await templates(), ...forProc() }); } catch (e) { toast.err(e); }
   };
 
   const save = async () => {
@@ -132,11 +155,19 @@ export default function Testing({ entity, processes, fy }) {
           <h1>Walkthroughs &amp; testing</h1>
           <p className="muted">{fyLabel(fy, entity.fy_end_month)} · fill the sheet, then submit each row for sign-off (manager → finance).</p>
         </div>
-        {isStaff && unplanned > 0 && (
-          <button className="btn primary" disabled={busy} onClick={setUp}>
-            {planned.size ? `Add ${unplanned} control${unplanned > 1 ? 's' : ''} to ${fyLabel(fy, entity.fy_end_month)}` : `Set up ${fyLabel(fy, entity.fy_end_month)} testing`}
-          </button>
-        )}
+        <div className="actions">
+          {(data.walkthroughs.length > 0 || data.tests.length > 0) && procObj && (
+            <>
+              <button className="btn" disabled={busy} onClick={downloadXlsx}>Download Excel</button>
+              <button className="btn" disabled={busy} onClick={openUpload}>Upload Excel</button>
+            </>
+          )}
+          {isStaff && unplanned > 0 && (
+            <button className="btn primary" disabled={busy} onClick={setUp}>
+              {planned.size ? `Add ${unplanned} control${unplanned > 1 ? 's' : ''} to ${fyLabel(fy, entity.fy_end_month)}` : `Set up ${fyLabel(fy, entity.fy_end_month)} testing`}
+            </button>
+          )}
+        </div>
       </div>
 
       {!data.walkthroughs.length && !data.tests.length ? (
@@ -228,6 +259,10 @@ export default function Testing({ entity, processes, fy }) {
         <RecordDrawer entity={entity} process={procObj} control={open.control}
           kind={kind} recordId={open.id} fy={fy}
           onClose={() => setOpen(null)} onChanged={reload} />
+      )}
+      {uploading && (
+        <TestingUploadFlow entity={entity} process={procObj} fy={fy} controls={data.byId} {...uploading}
+          onClose={() => setUploading(null)} onDone={reload} />
       )}
       {returning && (
         <PromptModal title={`Send back ${returning.length} item${returning.length > 1 ? 's' : ''}`} label="What needs to change?" required confirmLabel="Send back"

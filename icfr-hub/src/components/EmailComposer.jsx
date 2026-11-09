@@ -127,6 +127,7 @@ ${list.map((c) => `<tr><td style="padding:4px 10px;border-bottom:1px solid #eee"
         <button className="btn primary" disabled={busy || !emails.length} onClick={send}>{busy ? `Sending ${progress || ''}…` : `Send ${emails.length} email${emails.length === 1 ? '' : 's'}`}</button>
       </>
     }>
+      <div className="banner subtle">Email sending is a placeholder until the company mailbox is connected. You can prepare emails now; sending will say it is not connected yet.</div>
       {all.loading ? <Spinner /> : (
         <div className="email-grid">
           <div>

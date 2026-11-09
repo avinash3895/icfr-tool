@@ -431,3 +431,4 @@ textarea { resize: vertical; line-height: 1.45; }
 .email-preview { list-style: none; padding: 0; margin: 0; max-height: 220px; overflow-y: auto; }
 .email-preview li { display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 @media (max-width: 960px) { .email-grid { grid-template-columns: 1fr; } }
+.center-text { text-align: center; margin-top: 12px; }

@@ -4,7 +4,8 @@ import { displayValue, normalizeValue, sameValue } from './util';
 const loadExcel = async () => (await import('exceljs')).default;
 
 const META_SHEET = '_icfr_meta';
-const EXISTING = { key: '__existing', label: 'Existing Control ID (do not change)', help: 'Filled by ICFR Hub. It tells the app which control this row is. Leave it empty for a new control. To renumber a control, change the Control ID column, not this one.' };
+const EXISTING = { key: '__existing', label: 'Existing Control ID', help: 'The control number in ICFR Hub today. Do not change it. Leave it empty for a new control.' };
+const NEW_ID_LABEL = 'New Control ID';
 const INFO_COLS = [
   { key: '__updated', label: 'Last changed (read only)' },
 ];
@@ -46,10 +47,10 @@ export async function buildWorkbook({ entity, sheets, blank = false }) {
     [''],
     ['How to use this file', { bold: true }],
     ['• Each process has its own sheet. Edit the values, add new rows at the bottom, then upload the file on the process page (or the entity Processes page for the whole file).'],
-    ['• The grey "Existing Control ID" column tells the app which control each row is. Do not change it.'],
-    ['• To renumber controls, change the Control ID column (for example after inserting a control in the middle). Swaps such as 02 <-> 03 are fine.'],
-    ['• To add a control, add a row and leave Existing Control ID empty.'],
-    ['• To remove a control, delete its row. On upload you see the removed controls and confirm; their history is kept in the app.'],
+    ['• Existing Control ID = the number in ICFR Hub today (do not change it). New Control ID = the number you want.'],
+    ['• On upload the app compares the two and takes the New Control ID. Renumbering (e.g. after inserting a control) is just changing New Control ID.'],
+    ['• New control: add a row with Existing Control ID empty.'],
+    ['• Remove a control: delete its row. Controls not in the file are removed (their history is kept in the app).'],
     ['• Sample Size is filled from the sample size master. Type a number to override it for one control, or clear it to use the master.'],
     ['• Do not rename sheets or the header row; you may reorder columns. Grey columns are ignored on upload except Existing Control ID.'],
     ['• Several emails in one cell: separate them with a semicolon (;). Several list values: separate with a semicolon.'],
@@ -72,7 +73,7 @@ export async function buildWorkbook({ entity, sheets, blank = false }) {
     meta.addRow([name, process.id, JSON.stringify(all.map((c) => c.key))]);
     const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }] });
     ws.columns = all.map((c) => ({
-      header: c.label + (c.required ? ' *' : ''),
+      header: (c.key === 'control_id' ? NEW_ID_LABEL : c.label) + (c.required ? ' *' : ''),
       key: c.key,
       width: c.type === 'longtext' ? 48 : c.type === 'emails' ? 32 : c.key?.startsWith('__') ? 20 : Math.max(14, Math.min(30, (c.label || '').length + 4)),
       style: c.type === 'date' ? { numFmt: 'yyyy-mm-dd' } : {},
@@ -169,10 +170,8 @@ export async function readUpload(file, { entity, processes, profile }) {
   const metaSheet = wb.getWorksheet(META_SHEET);
   const sheetToProcess = new Map();
   const sheetKeys = new Map();
-  let downloadedAt = null;
   if (metaSheet) {
     const first = metaSheet.getRow(1).values;
-    downloadedAt = first[4] ? String(first[4]) : null;
     if (first[3] && first[3] !== entity.id) {
       globalErrors.push({ message: 'This file was downloaded for a different entity. Download a fresh file from this entity.' });
     }
@@ -209,7 +208,7 @@ export async function readUpload(file, { entity, processes, profile }) {
       if (!h) return;
       if (h.startsWith('existing control id')) { existingIdx = idx; return; }
       if (h.includes('(read only)')) return;
-      let col = columns.find((c) => normHeader(c.label) === h || c.key === h);
+      let col = h === NEW_ID_LABEL.toLowerCase() ? columns.find((c) => c.key === 'control_id') : columns.find((c) => normHeader(c.label) === h || c.key === h);
       // a column renamed after the file was downloaded: fall back to the key stored for that position
       if (!col) {
         const k = sheetKeys.get(ws.name)?.[idx - 1];
@@ -227,7 +226,11 @@ export async function readUpload(file, { entity, processes, profile }) {
       return;
     }
     const hasExisting = existingIdx !== null;
-    if (!hasExisting) warnings.push({ sheet: ws.name, message: `Sheet "${ws.name}" has no Existing Control ID column, so rows are matched by Control ID and no control is removed. Download a fresh file to renumber or remove controls.` });
+    if (!hasExisting) {
+      errors.push({ sheet: ws.name, row: 1, message: 'The Existing Control ID column is missing. Download a fresh file from ICFR Hub and make your changes in it.' });
+      result.push({ process, rows: [], unchanged: 0, errors, missing: [], kept: [] });
+      return;
+    }
     const missingCols = columns.filter((c) => !seen.has(c.key));
 
     const active = controls.filter((c) => !c.archived);
@@ -260,21 +263,16 @@ export async function readUpload(file, { entity, processes, profile }) {
         if (error) rowErrors.push(error);
       }
       const ref = String(data.control_id || '').trim();
-      const where = existingRef ? ` (existing ${existingRef})` : '';
-      if (!ref) { errors.push({ sheet: ws.name, row: rIdx, ref: existingRef, message: `Control ID is empty${where}.` }); return; }
+      if (!ref) { errors.push({ sheet: ws.name, row: rIdx, ref: existingRef, message: `New Control ID is empty${existingRef ? ` (existing ${existingRef})` : ''}.` }); return; }
 
       let match = null;
-      if (hasExisting) {
-        if (existingRef) {
-          match = byRef.get(existingRef.toLowerCase()) || null;
-          if (!match) { errors.push({ sheet: ws.name, row: rIdx, ref, message: `Existing Control ID ${existingRef} is not an active control of ${process.name}. Leave it empty for a new control.` }); return; }
-          if (existingSeen.has(existingRef.toLowerCase())) { errors.push({ sheet: ws.name, row: rIdx, ref, message: `Existing Control ID ${existingRef} is also on row ${existingSeen.get(existingRef.toLowerCase())}.` }); return; }
-          existingSeen.set(existingRef.toLowerCase(), rIdx);
-        }
-      } else {
-        match = byRef.get(ref.toLowerCase()) || null;
+      if (existingRef) {
+        match = byRef.get(existingRef.toLowerCase()) || null;
+        if (!match) { errors.push({ sheet: ws.name, row: rIdx, ref, message: `Existing Control ID ${existingRef} is not in ${process.name}. Leave it empty for a new control.` }); return; }
+        if (existingSeen.has(existingRef.toLowerCase())) { errors.push({ sheet: ws.name, row: rIdx, ref, message: `Existing Control ID ${existingRef} is also on row ${existingSeen.get(existingRef.toLowerCase())}.` }); return; }
+        existingSeen.set(existingRef.toLowerCase(), rIdx);
       }
-      if (proposedSeen.has(ref.toLowerCase())) { errors.push({ sheet: ws.name, row: rIdx, ref, message: `Control ID ${ref} is also on row ${proposedSeen.get(ref.toLowerCase())}.` }); return; }
+      if (proposedSeen.has(ref.toLowerCase())) { errors.push({ sheet: ws.name, row: rIdx, ref, message: `New Control ID ${ref} is also on row ${proposedSeen.get(ref.toLowerCase())}.` }); return; }
       proposedSeen.set(ref.toLowerCase(), rIdx);
       if (match) referenced.add(match.id);
       data.control_id = ref;
@@ -291,37 +289,19 @@ export async function readUpload(file, { entity, processes, profile }) {
       if (match && changes.length === 0) { unchanged++; kept.push(match.control_ref); return; }
 
       rowErrors.forEach((m) => errors.push({ sheet: ws.name, row: rIdx, ref, message: m }));
-      const stale = !!(match && downloadedAt && match.updated_at && new Date(match.updated_at) > new Date(downloadedAt));
-      if (stale) warnings.push({ sheet: ws.name, message: `${match.control_ref} was changed in ICFR Hub after this file was downloaded. Check its changes below: uploading will overwrite the newer values.` });
       rows.push({
         id: match?.id || null, ref, oldRef: match?.control_ref || null, isNew: !match,
         renumber: !!match && match.control_ref.toLowerCase() !== ref.toLowerCase(),
-        data, changes, sort: rIdx - 1, stale,
+        data, changes, sort: rIdx - 1,
       });
     });
 
-    const missing = hasExisting ? active.filter((c) => !referenced.has(c.id)) : [];
+    const missing = active.filter((c) => !referenced.has(c.id));
     result.push({ process, rows, unchanged, errors, missing, kept });
   });
 
   if (!result.length && !globalErrors.length) globalErrors.push({ message: 'No sheet in this file matches a process of this entity.' });
   return { sheets: result, errors: globalErrors, warnings };
-}
-
-// Control IDs that would be used twice after the upload (depends on whether missing controls are removed)
-export function finalIdProblems(sheet, removeMissing) {
-  const count = new Map();
-  const add = (ref, what) => {
-    const k = ref.toLowerCase();
-    if (!count.has(k)) count.set(k, []);
-    count.get(k).push(what);
-  };
-  sheet.rows.forEach((r) => add(r.ref, r.isNew ? `new row ${r.ref}` : r.oldRef !== r.ref ? `${r.oldRef} renumbered to ${r.ref}` : r.ref));
-  sheet.kept.forEach((ref) => add(ref, ref));
-  if (!removeMissing) sheet.missing.forEach((c) => add(c.control_ref, `${c.control_ref} (not in the file, kept)`));
-  return [...count.entries()].filter(([, v]) => v.length > 1).map(([k, v]) => ({
-    sheet: sheet.process.code, ref: k.toUpperCase(), message: `After this upload the same Control ID would be used twice: ${v.join(' and ')}.`,
-  }));
 }
 
 export async function downloadErrorReport(report, fileName) {

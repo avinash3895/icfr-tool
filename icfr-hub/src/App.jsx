@@ -40,7 +40,7 @@ function Root() {
     (async () => {
       try {
         const p = await getProfile(session.user.id);
-        if (!p) throw new Error('Your account has no profile yet. Ask an admin to check your access.');
+        if (!p) throw new Error('Your login works, but you do not have access to ICFR Hub. Ask the ICFR admin to add you under Setup → Users.');
         const [ents, grants] = await Promise.all([listEntities(), listGrants(session.user.id)]);
         if (!live) return;
         p._grants = grants;

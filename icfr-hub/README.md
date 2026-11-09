@@ -31,19 +31,29 @@ Stack (same as Studio Opal): Vite + React (plain JSX), Supabase (Postgres, Auth,
 
 Access grants (**Setup → Users & access → Manage**) open a whole entity, one process or a single control, view-only or "can edit" (prepare and submit walkthroughs/tests in that scope). Every rule is enforced in the database (row-level security and `security definer` functions), not only in the browser.
 
-### RCM Excel upload rules (admins only)
+### RCM Excel upload (admins only) – the rule
 
-1. Every downloaded sheet starts with a grey **Existing Control ID** column. It tells the app which control each row is. Do not change it.
-2. **Renumber** a control by changing its **Control ID** (for example after inserting a new control in the middle). Swaps such as 02 ↔ 03 work.
-3. **Add** a control by adding a row with Existing Control ID left empty.
-4. **Remove** a control by deleting its row. The preview lists the controls missing from the file; tick the box to remove them. Removed controls keep their walkthroughs, tests, files and history and can be restored (**Show removed**).
-5. Before anything is saved you see every new, changed, renumbered and removed control (old value → new value).
-6. **Any problem blocks the whole file**: missing required value, value not in the list, bad email/date/number, Existing Control ID that does not exist, the same Control ID twice after the upload, a column twice. The problem list can be downloaded as Excel.
-7. Sample Size in the file: leave the master value or empty to use the master; a different number becomes a manual override for that control.
-8. Columns are matched by header name, or by position if a column was renamed after the file was downloaded. Unknown columns are ignored with a note.
-9. If a control was changed in the app after the file was downloaded, the preview flags it as "newer in app".
-10. A file without the Existing Control ID column (an old file) matches rows by Control ID and removes nothing.
-11. Values are cleaned up: `yes`/`y`/`1` → Yes, list values ignore case, several emails or values are separated with `;`, dates can be date cells, `YYYY-MM-DD` or `DD/MM/YYYY`.
+The downloaded sheet has **Existing Control ID** (the number in ICFR Hub today) and **New Control ID** (the number you want).
+On upload the app compares the two and takes the New Control ID:
+
+| In the file | Result |
+|---|---|
+| Existing ID filled, New ID the same | that control, other changed columns are updated |
+| Existing ID filled, New ID different | that control gets the new number (renumbering, swaps such as 02 ↔ 03 work) |
+| Existing ID empty | new control |
+| Control not in the file | removed (history kept, can be restored with “Show removed”) |
+
+You see every change before saving. A file with a problem (required value missing, value not in the list, unknown Existing ID, the same New ID twice, …) is not saved at all; the problem list can be downloaded.
+Sample Size: keep the master value or leave it empty to use the master; another number is a manual override.
+
+### Testing Excel (walkthroughs and tests)
+
+On **Walkthroughs & testing**, **Download Excel** gives the selected process for the selected year: one sheet for the walkthrough and one per test period (Q1…Q4 etc.), with grey information columns and the white columns of the testing template.
+Responsible people fill it and **Upload Excel**: rows are matched by Control ID; only rows they may edit (Draft / Sent back, their controls) can change; Sample Size can only be changed by admins. Uploading saves the work; each row is then submitted on the website.
+
+### Email
+
+Built and working up to the send step, but **not connected to a mailbox yet** (placeholder). When the company mailbox is ready, set the `ICFR_RESEND_API_KEY` and `ICFR_MAIL_FROM` secrets on the `icfr-send-email` function, or replace its send step with the company mail service.
 
 ## Project layout
 
@@ -60,17 +70,16 @@ icfr-hub/
   src/pages/      Home, EntityPage, Dashboard, Processes, TemplateEditor, ProcessRcm, Testing, Tasks, Activity, Admin* (entities, users, sample size master)
 ```
 
-## Setup
+## Where it runs
 
-1. **Supabase project.** Create a new project (for example `icfr-hub`, region ap-south-1).
-2. **Database.** Run the four files in `supabase/migrations/` in order, either in the SQL editor or with `supabase db push`.
-3. **Edge functions.** Deploy `admin-users` and `send-email` (`supabase functions deploy admin-users send-email`). Both use the built-in `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
-   For email, create a free [Resend](https://resend.com) account, verify your company domain there, and set the function secrets `RESEND_API_KEY` and `MAIL_FROM` (for example `ICFR Hub <icfr@yourcompany.com>`).
-4. **Auth settings.** Under Authentication → Sign In / Providers, keep Email enabled, **turn off "Allow new users to sign up"**, and turn off email confirmation. Users are created by admins in the app.
-5. **First admin.** In Authentication → Users → Add user, create your own account with a password. The first account automatically becomes **Admin**.
-6. **Vercel.** Create a project with root directory `icfr-hub` and framework Vite, then set:
-   - `VITE_SUPABASE_URL` = `https://<project-ref>.supabase.co`
-   - `VITE_SUPABASE_ANON_KEY` = the project's publishable (anon) key
-7. Sign in, add entities under **Setup**, create processes, add users under **Users**.
+- **Database, login, files, functions:** the existing Supabase project **studio-admin** (`ybagmgjseignnyleovee`). Everything ICFR uses is prefixed so nothing else in that project is touched:
+  tables and functions `icfr_*` in `public`, storage buckets `icfr-evidence` and `icfr-uploads`, edge functions `icfr-admin-users` and `icfr-send-email`. No trigger was added to the shared login table.
+- The login is shared with the other studio apps, but a login only gets into ICFR Hub when it has an `icfr_profiles` row.
+- **First admin:** open the website; while there is no ICFR admin, the sign-in page shows “First time here? Set up ICFR Hub”. That creates your admin login (or links an existing one with its current password). After that the option disappears.
+- **Website:** Vite + React, deployed to Vercel. `.env.production` holds the public Supabase URL and publishable key.
 
-Local development: copy `.env.example` to `.env.local`, fill both values, then run `npm install` and `npm run dev`.
+## Setting it up again elsewhere
+
+1. Run the four files in `supabase/migrations/` in order.
+2. Deploy `supabase/functions/icfr-admin-users` and `icfr-send-email` (JWT verification off; they check the user themselves).
+3. Put the project URL and publishable key in `.env.production`, build (`npm install && npm run build`) and deploy `dist/` (Vercel: root directory `icfr-hub`, framework Vite).

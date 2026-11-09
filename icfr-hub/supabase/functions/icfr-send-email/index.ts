@@ -1,5 +1,6 @@
-// ICFR Hub: send an email with Excel attachments (admins only), using Resend (https://resend.com).
-// Secrets: RESEND_API_KEY, MAIL_FROM (e.g. "ICFR Hub <icfr@yourcompany.com>", a sender on a domain verified in Resend)
+// ICFR Hub: send an email with Excel attachments (admins only).
+// PLACEHOLDER: no mail service is connected yet. Set the secrets ICFR_RESEND_API_KEY and ICFR_MAIL_FROM
+// (Resend, https://resend.com) or replace sendMail() with your company mail service (e.g. Microsoft 365 / Gmail).
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 
 const cors = {
@@ -18,12 +19,12 @@ Deno.serve(async (req) => {
     const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
     const { data: who } = await admin.auth.getUser(token);
     if (!who?.user) return json({ error: 'Please sign in again.' }, 401);
-    const { data: me } = await admin.from('profiles').select('role, active').eq('id', who.user.id).single();
+    const { data: me } = await admin.from('icfr_profiles').select('role, active').eq('id', who.user.id).maybeSingle();
     if (!me || me.role !== 'admin' || !me.active) return json({ error: 'Only admins can send emails.' }, 403);
 
-    const key = Deno.env.get('RESEND_API_KEY');
-    const from = Deno.env.get('MAIL_FROM');
-    if (!key || !from) return json({ error: 'Email is not set up yet: add the RESEND_API_KEY and MAIL_FROM secrets to the send-email function.' }, 400);
+    const key = Deno.env.get('ICFR_RESEND_API_KEY');
+    const from = Deno.env.get('ICFR_MAIL_FROM');
+    if (!key || !from) return json({ error: 'Email sending is not connected yet. It will work once the company mailbox is set up.', not_configured: true }, 400);
 
     const b = await req.json();
     const to: string[] = (b.to || []).filter((e: string) => EMAIL.test(e));
@@ -43,7 +44,7 @@ Deno.serve(async (req) => {
     });
     const out = await res.json().catch(() => ({}));
     const ok = res.ok;
-    await admin.from('email_log').insert({
+    await admin.from('icfr_email_log').insert({
       entity_id: b.entity_id || null, to_emails: to, cc_emails: cc, subject: String(b.subject || ''),
       processes: b.processes || [], control_count: b.control_count || 0,
       status: ok ? 'sent' : 'failed', error: ok ? null : (out?.message || res.statusText), sent_by: who.user.id,

@@ -69,8 +69,10 @@ function NewUser({ onClose, onDone }) {
     if (!f.email.trim() || f.password.length < 8) return toast.err('Email and a password of at least 8 characters are needed.');
     setBusy(true);
     try {
-      await adminUsers('create', { ...f, email: f.email.trim().toLowerCase() });
-      toast.ok(`Account created for ${f.email}. Share the password with them; they can change it under My account.`);
+      const out = await adminUsers('create', { ...f, email: f.email.trim().toLowerCase() });
+      toast.ok(out.linked
+        ? `${f.email} already had a login on this server; it now has ICFR Hub access with its existing password.`
+        : `Account created for ${f.email}. Share the password with them; they can change it under My account.`);
       onDone();
     } catch (e) { toast.err(e); }
     setBusy(false);

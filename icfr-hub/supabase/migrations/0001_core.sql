@@ -9,7 +9,7 @@
 create extension if not exists pgcrypto;
 
 -- ---------------------------------------------------------------- profiles
-create table public.profiles (
+create table public.icfr_profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
   full_name text,
@@ -18,35 +18,19 @@ create table public.profiles (
   created_at timestamptz not null default now()
 );
 
-create or replace function public.handle_new_user() returns trigger
-language plpgsql security definer set search_path = public as $$
-begin
-  insert into public.profiles (id, email, full_name, role)
-  values (
-    new.id,
-    lower(new.email),
-    coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email,'@',1)),
-    -- the very first account becomes admin; everyone else starts as 'user' (roles are set by an admin,
-    -- never taken from sign-up metadata)
-    case when not exists (select 1 from public.profiles where role = 'admin') then 'admin' else 'user' end
-  )
-  on conflict (id) do nothing;
-  return new;
-end $$;
-
-create trigger on_auth_user_created after insert on auth.users
-  for each row execute function public.handle_new_user();
+-- Profiles are created by the icfr-admin-users edge function (this project's login is shared with other apps,
+-- so nothing is added to auth.users). The first admin is created through the same function while no admin exists.
 
 -- ---------------------------------------------------------------- settings
 -- key 'sample_matrix': { "risks": ["Low","Medium","High"], "sizes": { "<frequency>": { "<risk>": n } } }
-create table public.app_settings (
+create table public.icfr_app_settings (
   key text primary key,
   value jsonb not null,
   updated_at timestamptz not null default now(),
   updated_by uuid
 );
 
-insert into public.app_settings (key, value) values ('sample_matrix', '{
+insert into public.icfr_app_settings (key, value) values ('sample_matrix', '{
   "risks": ["Low", "Medium", "High"],
   "sizes": {
     "Annual":               {"Low": 1,  "Medium": 1,  "High": 1},
@@ -61,7 +45,7 @@ insert into public.app_settings (key, value) values ('sample_matrix', '{
 }');
 
 -- ---------------------------------------------------------------- master data
-create table public.entities (
+create table public.icfr_entities (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
   name text not null,
@@ -73,9 +57,9 @@ create table public.entities (
   created_at timestamptz not null default now()
 );
 
-create table public.processes (
+create table public.icfr_processes (
   id uuid primary key default gen_random_uuid(),
-  entity_id uuid not null references public.entities(id) on delete cascade,
+  entity_id uuid not null references public.icfr_entities(id) on delete cascade,
   code text not null,
   name text not null,
   description text,
@@ -91,9 +75,9 @@ create table public.processes (
 -- Column templates of a process: sheet 'rcm', 'walkthrough' or 'test'.
 -- `key` never changes (data is stored under it), `label` can be renamed.
 -- System columns drive the app. They can be renamed and reordered but not deleted.
-create table public.process_columns (
+create table public.icfr_process_columns (
   id uuid primary key default gen_random_uuid(),
-  process_id uuid not null references public.processes(id) on delete cascade,
+  process_id uuid not null references public.icfr_processes(id) on delete cascade,
   sheet text not null default 'rcm' check (sheet in ('rcm','walkthrough','test')),
   key text not null,
   label text not null,
@@ -110,10 +94,10 @@ create table public.process_columns (
 );
 
 -- ---------------------------------------------------------------- RCM, walkthroughs, tests
-create table public.controls (
+create table public.icfr_controls (
   id uuid primary key default gen_random_uuid(),
-  entity_id uuid not null references public.entities(id) on delete cascade,
-  process_id uuid not null references public.processes(id) on delete cascade,
+  entity_id uuid not null references public.icfr_entities(id) on delete cascade,
+  process_id uuid not null references public.icfr_processes(id) on delete cascade,
   control_ref text not null,
   data jsonb not null default '{}',
   -- denormalised from data for access checks, dashboards and test planning
@@ -133,16 +117,16 @@ create table public.controls (
   updated_by uuid
 );
 -- a Control ID is unique among the active controls of a process (archived controls keep their old ID)
-create unique index controls_ref_active on public.controls (process_id, lower(control_ref)) where not archived;
-create index on public.controls (entity_id);
-create index on public.controls using gin (responsible_emails);
-create index on public.controls using gin (manager_emails);
+create unique index icfr_controls_ref_active on public.icfr_controls (process_id, lower(control_ref)) where not archived;
+create index on public.icfr_controls (entity_id);
+create index on public.icfr_controls using gin (responsible_emails);
+create index on public.icfr_controls using gin (manager_emails);
 
-create table public.walkthroughs (
+create table public.icfr_walkthroughs (
   id uuid primary key default gen_random_uuid(),
-  control_id uuid not null references public.controls(id) on delete cascade,
-  entity_id uuid not null references public.entities(id) on delete cascade,
-  process_id uuid not null references public.processes(id) on delete cascade,
+  control_id uuid not null references public.icfr_controls(id) on delete cascade,
+  entity_id uuid not null references public.icfr_entities(id) on delete cascade,
+  process_id uuid not null references public.icfr_processes(id) on delete cascade,
   fy int not null,
   data jsonb not null default '{}',
   conclusion text check (conclusion in ('Effective','Ineffective','Not concluded')),
@@ -157,13 +141,13 @@ create table public.walkthroughs (
   updated_by uuid,
   unique (control_id, fy)
 );
-create index on public.walkthroughs (entity_id, fy);
+create index on public.icfr_walkthroughs (entity_id, fy);
 
-create table public.tests (
+create table public.icfr_tests (
   id uuid primary key default gen_random_uuid(),
-  control_id uuid not null references public.controls(id) on delete cascade,
-  entity_id uuid not null references public.entities(id) on delete cascade,
-  process_id uuid not null references public.processes(id) on delete cascade,
+  control_id uuid not null references public.icfr_controls(id) on delete cascade,
+  entity_id uuid not null references public.icfr_entities(id) on delete cascade,
+  process_id uuid not null references public.icfr_processes(id) on delete cascade,
   fy int not null,
   period text not null,          -- FY, H1, H2, Q1..Q4, M01..M12
   period_start date not null,
@@ -184,23 +168,23 @@ create table public.tests (
   updated_by uuid,
   unique (control_id, fy, period)
 );
-create index on public.tests (entity_id, fy);
+create index on public.icfr_tests (entity_id, fy);
 
 -- ---------------------------------------------------------------- access, trail, files, email
 -- A grant opens an entity (process_id null), one process (control_id null) or one control.
 -- can_edit lets the user prepare/submit walkthroughs and tests in that scope like the responsible person.
-create table public.access_grants (
+create table public.icfr_access_grants (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.profiles(id) on delete cascade,
-  entity_id uuid not null references public.entities(id) on delete cascade,
-  process_id uuid references public.processes(id) on delete cascade,
-  control_id uuid references public.controls(id) on delete cascade,
+  user_id uuid not null references public.icfr_profiles(id) on delete cascade,
+  entity_id uuid not null references public.icfr_entities(id) on delete cascade,
+  process_id uuid references public.icfr_processes(id) on delete cascade,
+  control_id uuid references public.icfr_controls(id) on delete cascade,
   can_edit boolean not null default false,
   created_at timestamptz not null default now()
 );
-create index on public.access_grants (user_id);
+create index on public.icfr_access_grants (user_id);
 
-create table public.workflow_events (
+create table public.icfr_workflow_events (
   id bigserial primary key,
   record_type text not null check (record_type in ('walkthrough','test')),
   record_id uuid not null,
@@ -214,10 +198,10 @@ create table public.workflow_events (
   actor_email text,
   at timestamptz not null default now()
 );
-create index on public.workflow_events (record_id);
-create index on public.workflow_events (entity_id, at desc);
+create index on public.icfr_workflow_events (record_id);
+create index on public.icfr_workflow_events (entity_id, at desc);
 
-create table public.audit_log (
+create table public.icfr_audit_log (
   id bigserial primary key,
   table_name text not null,
   record_id uuid,
@@ -228,14 +212,14 @@ create table public.audit_log (
   actor_email text,
   at timestamptz not null default now()
 );
-create index on public.audit_log (entity_id, at desc);
-create index on public.audit_log (record_id);
+create index on public.icfr_audit_log (entity_id, at desc);
+create index on public.icfr_audit_log (record_id);
 
-create table public.attachments (
+create table public.icfr_attachments (
   id uuid primary key default gen_random_uuid(),
   record_type text not null check (record_type in ('control','walkthrough','test')),
   record_id uuid not null,
-  control_id uuid not null references public.controls(id) on delete cascade,
+  control_id uuid not null references public.icfr_controls(id) on delete cascade,
   entity_id uuid not null,
   path text not null unique,
   file_name text not null,
@@ -244,12 +228,12 @@ create table public.attachments (
   uploaded_by uuid default auth.uid(),
   uploaded_at timestamptz not null default now()
 );
-create index on public.attachments (record_id);
+create index on public.icfr_attachments (record_id);
 
-create table public.uploads (
+create table public.icfr_uploads (
   id uuid primary key default gen_random_uuid(),
-  entity_id uuid not null references public.entities(id) on delete cascade,
-  process_id uuid references public.processes(id) on delete set null,
+  entity_id uuid not null references public.icfr_entities(id) on delete cascade,
+  process_id uuid references public.icfr_processes(id) on delete set null,
   file_name text not null,
   path text,
   summary jsonb,
@@ -257,9 +241,9 @@ create table public.uploads (
   uploaded_at timestamptz not null default now()
 );
 
-create table public.email_log (
+create table public.icfr_email_log (
   id uuid primary key default gen_random_uuid(),
-  entity_id uuid references public.entities(id) on delete set null,
+  entity_id uuid references public.icfr_entities(id) on delete set null,
   to_emails text[] not null,
   cc_emails text[] not null default '{}',
   subject text not null,
@@ -270,4 +254,4 @@ create table public.email_log (
   sent_by uuid default auth.uid(),
   sent_at timestamptz not null default now()
 );
-create index on public.email_log (entity_id, sent_at desc);
+create index on public.icfr_email_log (entity_id, sent_at desc);

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useApp } from '../lib/app';
 import { listColumns, listControls, applyUpload, storeUploadedFile } from '../lib/api';
-import { readUpload, downloadErrorReport, finalIdProblems } from '../lib/excel';
+import { readUpload, downloadErrorReport } from '../lib/excel';
 import { displayValue } from '../lib/util';
 import { Modal, Spinner, useToast } from './ui';
 
@@ -13,7 +13,6 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
   const [file, setFile] = useState(null);
   const [stage, setStage] = useState('pick'); // pick | reading | preview | applying | done
   const [report, setReport] = useState(null);
-  const [removeMissing, setRemoveMissing] = useState({}); // processId -> bool
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
   const [showAll, setShowAll] = useState(false);
@@ -30,7 +29,6 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
       })));
       const r = await readUpload(f, { entity, processes: loaded, profile });
       setReport(r);
-      setRemoveMissing(Object.fromEntries(r.sheets.map((s) => [s.process.id, true])));
       setStage('preview');
     } catch (e) {
       setErr(e);
@@ -38,10 +36,8 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
     }
   };
 
-  const idProblems = report ? report.sheets.flatMap((s) => finalIdProblems(s, !!removeMissing[s.process.id])) : [];
-  const fileErrors = report ? report.errors.length + report.sheets.reduce((a, s) => a + s.errors.length, 0) : 0;
-  const errorCount = fileErrors + idProblems.length;
-  const removals = report ? report.sheets.reduce((a, s) => a + (removeMissing[s.process.id] ? s.missing.length : 0), 0) : 0;
+  const errorCount = report ? report.errors.length + report.sheets.reduce((a, s) => a + s.errors.length, 0) : 0;
+  const removals = report ? report.sheets.reduce((a, s) => a + s.missing.length, 0) : 0;
   const changeCount = report ? report.sheets.reduce((a, s) => a + s.rows.length, 0) + removals : 0;
   const allRows = report ? report.sheets.flatMap((s) => s.rows) : [];
 
@@ -51,7 +47,7 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
       const path = await storeUploadedFile(entity.id, file);
       const out = [];
       for (const s of report.sheets) {
-        const archive = removeMissing[s.process.id] ? s.missing.map((c) => c.id) : [];
+        const archive = s.missing.map((c) => c.id);
         if (!s.rows.length && !archive.length) continue;
         const rows = s.rows.map((r) => ({
           id: r.id, sort: r.sort,
@@ -71,7 +67,7 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
 
   const footer = stage === 'preview' ? (
     <>
-      {errorCount > 0 && <button className="btn" onClick={() => downloadErrorReport({ ...report, errors: [...report.errors, ...idProblems] }, `Upload problems - ${file.name}`)}>Download problem list</button>}
+      {errorCount > 0 && <button className="btn" onClick={() => downloadErrorReport(report, `Upload problems - ${file.name}`)}>Download problem list</button>}
       <button className="btn ghost" onClick={() => { setStage('pick'); setReport(null); }}>Choose another file</button>
       <button className="btn primary" disabled={errorCount > 0 || changeCount === 0} onClick={apply}>
         {errorCount > 0 ? 'Fix the problems first' : changeCount === 0 ? 'Nothing to change' : `Apply ${changeCount} change${changeCount > 1 ? 's' : ''}`}
@@ -87,7 +83,7 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
           onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) read(f); }}>
           <input ref={fileRef} type="file" accept=".xlsx" hidden onChange={(e) => e.target.files[0] && read(e.target.files[0])} />
           <div className="dz-title">Drop the Excel file here, or click to choose it</div>
-          <div className="muted small">Use a file downloaded from ICFR Hub. You will see every new, changed, renumbered and removed control before anything is saved.</div>
+          <div className="muted small">Use a file downloaded from ICFR Hub. The app compares Existing Control ID with New Control ID and shows every change before saving.</div>
           {err && <div className="error-box">{err.message}</div>}
         </div>
       )}
@@ -105,7 +101,7 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
                   <span className="badge tone-green">{s.rows.filter((r) => r.isNew).length} new</span>
                   <span className="badge tone-blue">{s.rows.filter((r) => !r.isNew).length} changed</span>
                   {s.rows.some((r) => r.renumber) && <span className="badge tone-amber">{s.rows.filter((r) => r.renumber).length} renumbered</span>}
-                  {s.missing.length > 0 && <span className="badge tone-red">{removeMissing[s.process.id] ? s.missing.length : 0} removed</span>}
+                  {s.missing.length > 0 && <span className="badge tone-red">{s.missing.length} removed</span>}
                   <span className="badge tone-grey">{s.unchanged} unchanged</span>
                   {s.errors.length > 0 && <span className="badge tone-red">{s.errors.length} problem{s.errors.length > 1 ? 's' : ''}</span>}
                 </div>
@@ -115,12 +111,9 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
 
           {report.sheets.filter((s) => s.missing.length).map((s) => (
             <div key={s.process.id} className="card inset">
-              <h4>{s.missing.length} control{s.missing.length > 1 ? 's are' : ' is'} not in the file ({s.process.name})</h4>
+              <h4>Not in the file, will be removed ({s.process.name})</h4>
               <p className="small">{s.missing.map((c) => c.control_ref).join(', ')}</p>
-              <label className="check">
-                <input type="checkbox" checked={!!removeMissing[s.process.id]} onChange={(e) => setRemoveMissing((m) => ({ ...m, [s.process.id]: e.target.checked }))} />
-                Remove {s.missing.length > 1 ? 'them' : 'it'} from the RCM (walkthroughs, tests, files and history are kept and can be restored)
-              </label>
+              <p className="small muted">Their walkthroughs, tests, files and history are kept, and they can be restored with “Show removed”.</p>
             </div>
           ))}
 
@@ -134,7 +127,6 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
                   {report.sheets.flatMap((s) => s.errors.map((e, i) => (
                     <tr key={s.process.id + i}><td>{e.sheet}</td><td>{e.row}</td><td>{e.ref}</td><td>{e.message}</td></tr>
                   )))}
-                  {idProblems.map((e, i) => <tr key={'id' + i}><td>{e.sheet}</td><td /><td>{e.ref}</td><td>{e.message}</td></tr>)}
                 </tbody>
               </table>
             </div>
@@ -149,14 +141,14 @@ export default function UploadFlow({ entity, processes, onClose, onDone }) {
             <div className="card inset">
               <h4>Changes that will be saved</h4>
               <table className="table compact changes">
-                <thead><tr><th>Control</th><th>Column</th><th>Now</th><th>After upload</th></tr></thead>
+                <thead><tr><th>Existing ID</th><th>Column</th><th>Now</th><th>After upload</th></tr></thead>
                 <tbody>
                   {allRows.slice(0, showAll ? undefined : 80).flatMap((r) => (r.isNew
                     ? [<tr key={'n' + r.ref}><td><b>{r.ref}</b></td><td colSpan={3}><span className="badge tone-green">New control</span> {r.data.control_description}</td></tr>]
                     : r.changes.map((c, i) => (
                       <tr key={r.id + c.key}>
-                        <td>{i === 0 && <><b>{r.oldRef}</b>{r.stale && <span className="badge tone-amber" title="Changed in the app after the file was downloaded">newer in app</span>}</>}</td>
-                        <td>{c.key === 'control_id' ? <span className="badge tone-amber">Renumbered</span> : c.label}</td>
+                        <td>{i === 0 && <b>{r.oldRef}</b>}</td>
+                        <td>{c.key === 'control_id' ? <span className="badge tone-amber">New Control ID</span> : c.label}</td>
                         <td className="from">{displayValue(c.col, c.from) || <span className="muted">empty</span>}</td>
                         <td className="to">{displayValue(c.col, c.to) || <span className="muted">{c.key === 'sample_size' ? 'from master' : 'empty'}</span>}</td>
                       </tr>

@@ -5,7 +5,7 @@ import { fmtDateTime, auditValue, auditChanges } from '../lib/util';
 import { Spinner, ErrorBox, Tabs, Empty, useToast } from '../components/ui';
 import { actionText } from './Dashboard';
 
-const TABLES = { controls: 'Control', walkthroughs: 'Walkthrough', tests: 'Test', processes: 'Process', process_columns: 'Template column', entities: 'Entity', access_grants: 'Access', attachments: 'File' };
+const TABLES = { icfr_controls: 'Control', icfr_walkthroughs: 'Walkthrough', icfr_tests: 'Test', icfr_processes: 'Process', icfr_process_columns: 'Template column', icfr_entities: 'Entity', icfr_access_grants: 'Access', icfr_attachments: 'File', icfr_app_settings: 'Sample size master', icfr_profiles: 'User' };
 const HIDE = new Set(['data', 'created_at', 'updated_at', 'updated_by', 'submitted_by', 'manager_by', 'finance_by', 'responsible_emails', 'manager_emails', 'is_key', 'frequency', 'test_frequency', 'control_ref']);
 
 export default function Activity({ entity, processes }) {
