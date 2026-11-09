@@ -9,6 +9,7 @@ import EntityPage from './pages/EntityPage';
 import Tasks from './pages/Tasks';
 import AdminEntities from './pages/AdminEntities';
 import AdminUsers from './pages/AdminUsers';
+import AdminSettings from './pages/AdminSettings';
 import Account from './pages/Account';
 
 export default function App() {
@@ -57,7 +58,7 @@ function Root() {
   const ctx = useMemo(() => ({
     session, profile, entities,
     isAdmin: profile?.role === 'admin',
-    isStaff: profile?.role === 'admin' || profile?.role === 'finance',
+    isStaff: profile?.role === 'admin',
     refresh: () => setTick((t) => t + 1),
   }), [session, profile, entities]);
 
@@ -113,6 +114,7 @@ function Page({ parts, menuOpen }) {
   if (a === 'tasks') return <Tasks />;
   if (a === 'admin' && b === 'entities') return <AdminEntities />;
   if (a === 'admin' && b === 'users') return <AdminUsers />;
+  if (a === 'admin' && b === 'samples') return <AdminSettings />;
   if (a === 'account') return <Account />;
   return <Home />;
 }
@@ -140,8 +142,7 @@ function TopBar({ onMenu }) {
       <nav className="topnav">
         <a href="#/" className={!parts.length ? 'on' : ''}>Entities</a>
         <a href="#/tasks" className={parts[0] === 'tasks' ? 'on' : ''}>My tasks</a>
-        {isAdmin && <a href="#/admin/users" className={parts[0] === 'admin' && parts[1] === 'users' ? 'on' : ''}>Users</a>}
-        {isAdmin && <a href="#/admin/entities" className={parts[0] === 'admin' && parts[1] === 'entities' ? 'on' : ''}>Setup</a>}
+        {isAdmin && <a href="#/admin/entities" className={parts[0] === 'admin' ? 'on' : ''}>Setup</a>}
       </nav>
       <div className="user-menu">
         <button className="user-btn" onClick={() => setOpen((o) => !o)}>

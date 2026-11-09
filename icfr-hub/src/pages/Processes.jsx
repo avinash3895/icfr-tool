@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp, useLoad, go } from '../lib/app';
-import { createProcess, listColumns, listControls, listAllProcesses, deleteProcess } from '../lib/api';
+import { createProcess, listColumns, listControls, listAllProcesses, deleteProcess, getSampleMatrix } from '../lib/api';
 import { downloadRcm } from '../lib/excel';
-import { SYSTEM_COLUMNS, SUGGESTED_COLUMNS } from '../lib/util';
-import { Modal, Field, Empty, useToast, Spinner, PromptModal } from '../components/ui';
+import { SUGGESTED_COLUMNS, SHEETS, defaultColumns } from '../lib/util';
+import { Modal, Field, Empty, useToast, Spinner, PromptModal, Tabs } from '../components/ui';
+import EmailComposer from '../components/EmailComposer';
 import ColumnEditor, { validateColumns } from '../components/ColumnEditor';
 import UploadFlow from '../components/UploadFlow';
 
@@ -13,6 +14,7 @@ export default function Processes({ entity, processes, reloadProcesses }) {
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [emailing, setEmailing] = useState(false);
   const [busy, setBusy] = useState(false);
   const counts = useLoad(async () => {
     const cs = await listControls({ entityId: entity.id });
@@ -34,7 +36,8 @@ export default function Processes({ entity, processes, reloadProcesses }) {
         </div>
         <div className="actions">
           {processes.length > 0 && <button className="btn" disabled={busy} onClick={() => dl(false)}>Download all (Excel)</button>}
-          {processes.length > 0 && <button className="btn" onClick={() => setUploading(true)}>Upload Excel</button>}
+          {isAdmin && processes.length > 0 && <button className="btn" onClick={() => setUploading(true)}>Upload Excel</button>}
+          {isAdmin && processes.length > 0 && <button className="btn" onClick={() => setEmailing(true)}>Send emails</button>}
           {isAdmin && <button className="btn primary" onClick={() => setCreating(true)}>+ New process</button>}
         </div>
       </div>
@@ -66,6 +69,7 @@ export default function Processes({ entity, processes, reloadProcesses }) {
 
       {creating && <NewProcess entity={entity} processes={processes} onClose={() => setCreating(false)} onCreated={(p) => { reloadProcesses(); setCreating(false); go(`/e/${entity.id}/p/${p.id}`); }} />}
       {uploading && <UploadFlow entity={entity} processes={processes} onClose={() => setUploading(false)} onDone={counts.reload} />}
+      {emailing && <EmailComposer entity={entity} processes={processes} onClose={() => setEmailing(false)} />}
       {deleting && (
         <PromptModal title={`Delete ${deleting.name}?`} danger confirmLabel="Delete process and its controls"
           onCancel={() => setDeleting(null)}
@@ -74,7 +78,7 @@ export default function Processes({ entity, processes, reloadProcesses }) {
             setDeleting(null);
           }}>
           <p>This permanently deletes the process, its template, <b>{counts.data?.[deleting.id] || 0} controls</b> and all their walkthroughs, tests and attachments. The audit trail keeps a record of the deletion.</p>
-          <p className="muted small">To stop using a process but keep its history, archive its controls instead.</p>
+          <p className="muted small">To stop using a process but keep its history, remove its controls instead.</p>
         </PromptModal>
       )}
     </div>
@@ -85,10 +89,21 @@ function NewProcess({ entity, processes, onClose, onCreated }) {
   const toast = useToast();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ name: '', code: '', description: '', owner_name: '', owner_email: '' });
-  const [columns, setColumns] = useState(() => [
-    ...SYSTEM_COLUMNS.map((c) => ({ ...c, system: true, options: c.options || [] })),
-    ...SUGGESTED_COLUMNS.filter((c) => ['risk_description', 'control_objective', 'control_type', 'control_nature', 'assertions', 'evidence'].includes(c.key)).map((c) => ({ ...c, options: c.options || [] })),
-  ]);
+  const [columns, setColumns] = useState(() => ({
+    rcm: [
+      ...defaultColumns('rcm'),
+      ...SUGGESTED_COLUMNS.filter((c) => ['risk_description', 'control_objective', 'control_type', 'control_nature', 'assertions', 'evidence'].includes(c.key)).map((c) => ({ ...c, options: c.options || [] })),
+    ],
+    walkthrough: defaultColumns('walkthrough'),
+    test: defaultColumns('test'),
+  }));
+  const [sheet, setSheet] = useState('rcm');
+  const matrix = useLoad(() => getSampleMatrix(), []);
+  // risk levels come from the sample size master
+  useEffect(() => {
+    if (!matrix.data) return;
+    setColumns((c) => ({ ...c, rcm: c.rcm.map((x) => (x.key === 'risk_level' ? { ...x, options: matrix.data.risks } : x)) }));
+  }, [matrix.data]);
   const [copyFrom, setCopyFrom] = useState('');
   const [busy, setBusy] = useState(false);
   const all = useLoad(() => listAllProcesses(), []);
@@ -106,15 +121,18 @@ function NewProcess({ entity, processes, onClose, onCreated }) {
     setCopyFrom(pid);
     if (!pid) return;
     try {
-      const cols = await listColumns(pid);
-      setColumns(cols.map((c) => ({ key: c.key, label: c.label, type: c.type, options: c.options, required: c.required, system: c.system, help: c.help })));
-      toast.ok('Columns copied. You can still change them.');
+      const cols = await listColumns(pid, false, null);
+      const pick = (sh) => cols.filter((c) => c.sheet === sh).map((c) => ({ key: c.key, label: c.label, type: c.type, options: c.options, required: c.required, system: c.system, help: c.help }));
+      setColumns({ rcm: pick('rcm'), walkthrough: pick('walkthrough'), test: pick('test') });
+      toast.ok('Templates copied. You can still change them.');
     } catch (e) { toast.err(e); }
   };
 
   const create = async () => {
-    const problem = validateColumns(columns);
-    if (problem) return toast.err(problem);
+    for (const sh of SHEETS) {
+      const problem = validateColumns(columns[sh.id]);
+      if (problem) { setSheet(sh.id); return toast.err(`${sh.label}: ${problem}`); }
+    }
     setBusy(true);
     try {
       const p = await createProcess({ ...form, entity_id: entity.id, sort: processes.length }, columns);
@@ -140,7 +158,7 @@ function NewProcess({ entity, processes, onClose, onCreated }) {
       {step === 2 && (
         <>
           <div className="row gap">
-            <p className="muted grow">These are the columns of the RCM for this process and of its Excel template. The system columns drive sign-offs and testing. You can change all of this later under “Edit process”.</p>
+            <p className="muted grow">Choose the columns of the RCM, of the walkthrough and of the testing sheet for this process. System columns drive sample sizes, testing and sign-offs. You can change all of this later under “Edit process”.</p>
             <label className="inline-field">
               <span className="small">Copy columns from</span>
               <select value={copyFrom} onChange={(e) => doCopy(e.target.value)}>
@@ -149,7 +167,8 @@ function NewProcess({ entity, processes, onClose, onCreated }) {
               </select>
             </label>
           </div>
-          {all.loading ? <Spinner /> : <ColumnEditor columns={columns} onChange={setColumns} />}
+          <Tabs value={sheet} onChange={setSheet} tabs={SHEETS.map((x) => ({ id: x.id, label: x.label, count: columns[x.id].length }))} />
+          {all.loading ? <Spinner /> : <ColumnEditor key={sheet} sheet={sheet} columns={columns[sheet]} onChange={(c) => setColumns((x) => ({ ...x, [sheet]: c }))} />}
         </>
       )}
     </Modal>

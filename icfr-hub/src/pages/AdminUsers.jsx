@@ -3,6 +3,7 @@ import { useApp, useLoad } from '../lib/app';
 import { listProfiles, updateProfile, adminUsers, listGrants, addGrant, deleteGrant, listAllProcesses, listControls } from '../lib/api';
 import { ROLES } from '../lib/util';
 import { Modal, Field, Spinner, ErrorBox, Empty, useToast } from '../components/ui';
+import { SetupTabs } from './AdminEntities';
 
 const ROLE_HELP = {
   admin: 'Everything: entities, processes, templates, users, plus finance sign-off.',
@@ -26,6 +27,7 @@ export default function AdminUsers() {
 
   return (
     <div className="page">
+      <SetupTabs on="users" />
       <div className="page-head">
         <div>
           <h1>Users &amp; access</h1>
@@ -43,7 +45,7 @@ export default function AdminUsers() {
                 <td><b>{p.full_name}</b>{p.id === me.id && <span className="muted small"> (you)</span>}</td>
                 <td>{p.email}</td>
                 <td>{ROLES[p.role]}</td>
-                <td>{p.role === 'admin' || p.role === 'finance' ? <span className="muted small">all entities</span> : g.length ? `${g.length} grant${g.length > 1 ? 's' : ''}` : <span className="muted small">via controls only</span>}</td>
+                <td>{p.role === 'admin' ? <span className="muted small">all entities</span> : g.length ? `${g.length} grant${g.length > 1 ? 's' : ''}` : <span className="muted small">via controls only</span>}</td>
                 <td>{p.active ? <span className="badge tone-green">Active</span> : <span className="badge tone-grey">Switched off</span>}</td>
                 <td className="right"><button className="btn small ghost">Manage</button></td>
               </tr>
@@ -139,7 +141,7 @@ function EditUser({ person, procs, grants, onClose, onChanged }) {
       {(f.role === 'user' || f.role === 'viewer') && (
         <div className="card inset">
           <h4>Access grants</h4>
-          <p className="small muted">Extra access on top of the controls where this person is named as Responsible or Manager. “Can edit” lets them prepare and submit in that scope.</p>
+          <p className="small muted">Extra access on top of the controls where this person is named as Responsible or Manager. “Can edit” lets them prepare and submit walkthroughs and tests in that scope.</p>
           {!list.length && <p className="muted small">No grants.</p>}
           <ul className="grants">
             {list.map((x) => (

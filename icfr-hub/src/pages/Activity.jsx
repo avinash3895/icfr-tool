@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp, useLoad } from '../lib/app';
-import { listUploads, auditForEntity, recentEvents, downloadUploadedFile, listProfiles, listControls, listWalkthroughs, listTests } from '../lib/api';
+import { listUploads, auditForEntity, recentEvents, downloadUploadedFile, listProfiles, listControls, listWalkthroughs, listTests, listEmails } from '../lib/api';
 import { fmtDateTime, auditValue, auditChanges } from '../lib/util';
 import { Spinner, ErrorBox, Tabs, Empty, useToast } from '../components/ui';
 import { actionText } from './Dashboard';
@@ -13,7 +13,7 @@ export default function Activity({ entity, processes }) {
   const toast = useToast();
   const [tab, setTab] = useState('uploads');
   const { data, loading, error } = useLoad(async () => {
-    const [uploads, audit, events, people, controls, walks, tests] = await Promise.all([
+    const [uploads, audit, events, people, controls, walks, tests, emails] = await Promise.all([
       listUploads(entity.id),
       isStaff ? auditForEntity(entity.id, 300) : Promise.resolve([]),
       recentEvents(entity.id, 200),
@@ -21,6 +21,7 @@ export default function Activity({ entity, processes }) {
       listControls({ entityId: entity.id, includeArchived: true }),
       isStaff ? listWalkthroughs({ entityId: entity.id }) : Promise.resolve([]),
       isStaff ? listTests({ entityId: entity.id }) : Promise.resolve([]),
+      isStaff ? listEmails(entity.id) : Promise.resolve([]),
     ]);
     // record id -> readable name
     const names = new Map();
@@ -28,7 +29,7 @@ export default function Activity({ entity, processes }) {
     controls.forEach((c) => names.set(c.id, c.control_ref));
     walks.forEach((w) => names.set(w.id, `${ref.get(w.control_id) || ''} (FY${w.fy})`));
     tests.forEach((t) => names.set(t.id, `${ref.get(t.control_id) || ''} ${t.period} (FY${t.fy})`));
-    return { uploads, audit, events, people, names };
+    return { uploads, audit, events, people, names, emails };
   }, [entity.id]);
 
   if (loading && !data) return <Spinner />;
@@ -39,7 +40,7 @@ export default function Activity({ entity, processes }) {
   const tabs = [
     { id: 'uploads', label: 'Excel uploads', count: data.uploads.length },
     { id: 'signoffs', label: 'Sign-offs', count: data.events.length },
-    ...(isStaff ? [{ id: 'audit', label: 'Audit trail' }] : []),
+    ...(isStaff ? [{ id: 'emails', label: 'Emails', count: data.emails.length }, { id: 'audit', label: 'Audit trail' }] : []),
   ];
 
   return (
@@ -54,7 +55,7 @@ export default function Activity({ entity, processes }) {
               <tr key={u.id}>
                 <td>{fmtDateTime(u.uploaded_at)}</td><td>{who(u.uploaded_by)}</td><td>{pname(u.process_id)}</td>
                 <td>{u.path ? <button className="link" onClick={() => downloadUploadedFile(u).catch(toast.err)}>{u.file_name}</button> : u.file_name}</td>
-                <td>{u.summary ? `${u.summary.added} added, ${u.summary.updated} updated` : ''}</td>
+                <td>{u.summary ? `${u.summary.added} added, ${u.summary.updated} updated${u.summary.renumbered ? ` (${u.summary.renumbered} renumbered)` : ''}${u.summary.archived ? `, ${u.summary.archived} removed` : ''}` : ''}</td>
               </tr>
             ))}
           </tbody>
@@ -69,6 +70,21 @@ export default function Activity({ entity, processes }) {
             </li>
           ))}
         </ul>
+      ))}
+      {tab === 'emails' && (!data.emails.length ? <Empty title="No emails sent yet" /> : (
+        <table className="table">
+          <thead><tr><th>When</th><th>By</th><th>To</th><th>Subject</th><th>Processes</th><th className="num">Controls</th><th>Result</th></tr></thead>
+          <tbody>
+            {data.emails.map((m) => (
+              <tr key={m.id}>
+                <td className="nowrap">{fmtDateTime(m.sent_at)}</td><td>{who(m.sent_by)}</td>
+                <td>{m.to_emails.join(', ')}{m.cc_emails.length ? <div className="small muted">cc {m.cc_emails.join(', ')}</div> : null}</td>
+                <td>{m.subject}</td><td>{m.processes.join(', ')}</td><td className="num">{m.control_count}</td>
+                <td>{m.status === 'sent' ? <span className="badge tone-green">Sent</span> : <span className="badge tone-red" title={m.error || ''}>Failed</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ))}
       {tab === 'audit' && (
         <>

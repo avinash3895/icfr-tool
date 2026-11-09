@@ -70,7 +70,7 @@ export default function Dashboard({ entity, processes, fy }) {
 
       {s.noTestPlan && isStaff && (
         <div className="banner">
-          Walkthroughs and tests for {fyLabel(fy, entity.fy_end_month)} are not set up yet. Setting up creates one walkthrough per control and one test per testing period, based on each control’s testing frequency.
+          Walkthroughs and tests for {fyLabel(fy, entity.fy_end_month)} are not set up yet. Setting up creates one walkthrough per control and one test per testing period, based on each control’s testing frequency, with the sample sizes from the RCM.
         </div>
       )}
 
@@ -78,11 +78,11 @@ export default function Dashboard({ entity, processes, fy }) {
         <>
           <div className="stats">
             <Stat label="Controls" value={s.controls} sub={`${s.keyControls} key`} onClick={() => go(`/e/${entity.id}/processes`)} />
-            <Stat label="RCM signed off" value={`${pct(s.rcmStatus.approved || 0, s.controls)}%`} sub={`${s.rcmStatus.approved || 0} of ${s.controls}`} />
+            <Stat label="High-risk controls" value={s.highRisk} sub={s.noSample ? `${s.noSample} without a sample size` : 'all have a sample size'} />
             <Stat label="Walkthroughs signed off" value={`${s.walk.approved} / ${s.walk.total}`} sub={`${pct(s.walk.approved, s.walk.total)}%`} onClick={() => go(`/e/${entity.id}/testing`)} />
             <Stat label="Tests due, signed off" value={`${s.test.dueApproved} / ${s.test.due}`} sub={`${s.test.total} planned for the year`} onClick={() => go(`/e/${entity.id}/testing`)} />
             <Stat label="Overdue tests" value={s.test.overdue} tone={s.test.overdue ? 'red' : null} sub="period ended, not signed off" />
-            <Stat label="Awaiting sign-off" value={s.pending} tone={s.pending ? 'amber' : null} sub="with manager or finance" onClick={() => go('/tasks')} />
+            <Stat label="Awaiting sign-off" value={s.pending} tone={s.pending ? 'amber' : null} sub="walkthroughs and tests" onClick={() => go('/tasks')} />
             <Stat label="Ineffective" value={s.issues} tone={s.issues ? 'red' : null} sub={`${s.exceptions} with exceptions`} />
             <Stat label="Controls without owner" value={s.noOwner} tone={s.noOwner ? 'amber' : null} />
           </div>
@@ -94,8 +94,8 @@ export default function Dashboard({ entity, processes, fy }) {
                 <thead>
                   <tr>
                     <th>Process</th><th className="num">Controls</th><th className="num">Key</th>
-                    <th style={{ width: '20%' }}>RCM sign-off</th><th style={{ width: '20%' }}>Walkthroughs</th>
-                    <th style={{ width: '20%' }}>Tests due</th><th className="num">Ineffective</th>
+                    <th className="num">High risk</th><th style={{ width: '22%' }}>Walkthroughs</th>
+                    <th style={{ width: '22%' }}>Tests due</th><th className="num">Ineffective</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -104,7 +104,7 @@ export default function Dashboard({ entity, processes, fy }) {
                       <td><span className="pcode">{p.code}</span> <b>{p.name}</b></td>
                       <td className="num">{ps.controls}</td>
                       <td className="num">{ps.keyControls}</td>
-                      <td><Progress parts={statusParts(ps.rcmStatus)} /></td>
+                      <td className="num">{ps.highRisk}</td>
                       <td><Progress parts={statusParts(ps.walk.status)} /><span className="small muted">{ps.walk.approved}/{ps.walk.total}</span></td>
                       <td><Progress parts={statusParts(dueStatus)} /><span className="small muted">{dueStatus.approved || 0}/{due}</span></td>
                       <td className={`num ${ps.issues ? 'tone-text-red' : ''}`}>{ps.issues}</td>

@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { COLUMN_TYPES, SUGGESTED_COLUMNS, slugKey } from '../lib/util';
+import { COLUMN_TYPES, SUGGESTED_COLUMNS, LOCKED_OPTIONS, slugKey } from '../lib/util';
 
 // Edit a list of template columns. Keys of existing columns never change, so stored data is kept when a column is renamed.
-export default function ColumnEditor({ columns, onChange, archived = [] }) {
+export default function ColumnEditor({ columns, onChange, archived = [], sheet = 'rcm' }) {
   const [open, setOpen] = useState(null);
   const keys = columns.map((c) => c.key);
   const set = (i, patch) => onChange(columns.map((c, j) => (j === i ? { ...c, ...patch } : c)));
@@ -19,7 +19,8 @@ export default function ColumnEditor({ columns, onChange, archived = [] }) {
     onChange([...columns, { key, label: c.label, type: c.type || 'text', options: c.options || [], required: false, help: c.help || '' }]);
     setOpen(columns.length);
   };
-  const unused = SUGGESTED_COLUMNS.filter((s) => !keys.includes(s.key));
+  const unused = sheet === 'rcm' ? SUGGESTED_COLUMNS.filter((s) => !keys.includes(s.key)) : [];
+  const locked = (c) => c.system && (LOCKED_OPTIONS[sheet] || []).includes(c.key);
   const restorable = archived.filter((a) => !keys.includes(a.key));
 
   return (
@@ -36,7 +37,7 @@ export default function ColumnEditor({ columns, onChange, archived = [] }) {
               {COLUMN_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
             <label className="check">
-              <input type="checkbox" checked={!!c.required} disabled={c.key === 'control_id'} onChange={(e) => set(i, { required: e.target.checked })} />
+              <input type="checkbox" checked={!!c.required} disabled={c.key === 'control_id' || c.key === 'conclusion'} onChange={(e) => set(i, { required: e.target.checked })} />
             </label>
             <div className="col-actions">
               <button type="button" className="icon-btn" title="Move up" onClick={() => move(i, -1)}>↑</button>
@@ -49,7 +50,10 @@ export default function ColumnEditor({ columns, onChange, archived = [] }) {
           </div>
           {(open === i || (['select', 'multiselect'].includes(c.type) && !(c.options || []).length)) && (
             <div className="col-more">
-              {['select', 'multiselect'].includes(c.type) && (
+              {['select', 'multiselect'].includes(c.type) && locked(c) && (
+                <div className="small muted">List values: {(c.options || []).join(', ')}{c.key === 'risk_level' ? ' (set in the sample size master)' : ' (fixed by the app)'}</div>
+              )}
+              {['select', 'multiselect'].includes(c.type) && !locked(c) && (
                 <label>
                   <span>List values (one per line)</span>
                   <textarea rows={4} value={(c.options || []).join('\n')} onChange={(e) => set(i, { options: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })} />

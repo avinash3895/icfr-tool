@@ -1,9 +1,10 @@
 -- ICFR Hub: core schema
--- Entities -> Processes (each with its own column template) -> Controls (RCM rows)
+-- Entities -> Processes (each with its own RCM / walkthrough / test column templates) -> Controls (RCM rows)
 -- Per fiscal year: one Walkthrough per control, Tests per testing period.
--- Every RCM row, walkthrough and test follows the same sign-off flow:
---   draft/returned --(preparer submits)--> pending_manager --(manager)--> pending_finance --(finance)--> approved
---   managers and finance can send back (returned); finance can reopen an approved record.
+-- The RCM is maintained by admins (finance) only, no sign-off needed.
+-- Walkthroughs and tests follow a sign-off flow:
+--   draft/returned --(responsible submits)--> pending_manager --(manager)--> pending_finance --(admin)--> approved
+--   the manager or an admin can send back (returned); an admin can reopen an approved record.
 
 create extension if not exists pgcrypto;
 
@@ -12,7 +13,7 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
   full_name text,
-  role text not null default 'user' check (role in ('admin','finance','user','viewer')),
+  role text not null default 'user' check (role in ('admin','user','viewer')),
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
@@ -35,6 +36,29 @@ end $$;
 
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ---------------------------------------------------------------- settings
+-- key 'sample_matrix': { "risks": ["Low","Medium","High"], "sizes": { "<frequency>": { "<risk>": n } } }
+create table public.app_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now(),
+  updated_by uuid
+);
+
+insert into public.app_settings (key, value) values ('sample_matrix', '{
+  "risks": ["Low", "Medium", "High"],
+  "sizes": {
+    "Annual":               {"Low": 1,  "Medium": 1,  "High": 1},
+    "Semi-annual":          {"Low": 1,  "Medium": 1,  "High": 2},
+    "Quarterly":            {"Low": 2,  "Medium": 3,  "High": 4},
+    "Monthly":              {"Low": 2,  "Medium": 3,  "High": 5},
+    "Weekly":               {"Low": 5,  "Medium": 10, "High": 15},
+    "Daily":                {"Low": 25, "Medium": 40, "High": 60},
+    "Multiple times a day": {"Low": 25, "Medium": 60, "High": 100},
+    "Event-driven":         {"Low": 25, "Medium": 40, "High": 60}
+  }
+}');
 
 -- ---------------------------------------------------------------- master data
 create table public.entities (
@@ -64,12 +88,13 @@ create table public.processes (
   unique (entity_id, code)
 );
 
--- Column template of a process. `key` never changes (data is stored under it), `label` can be renamed.
--- System columns (system = true) drive the app: control_id, control_description, key_control,
--- frequency, test_frequency, responsible, manager. They can be renamed and reordered but not deleted.
+-- Column templates of a process: sheet 'rcm', 'walkthrough' or 'test'.
+-- `key` never changes (data is stored under it), `label` can be renamed.
+-- System columns drive the app. They can be renamed and reordered but not deleted.
 create table public.process_columns (
   id uuid primary key default gen_random_uuid(),
   process_id uuid not null references public.processes(id) on delete cascade,
+  sheet text not null default 'rcm' check (sheet in ('rcm','walkthrough','test')),
   key text not null,
   label text not null,
   type text not null default 'text'
@@ -81,7 +106,7 @@ create table public.process_columns (
   width int,
   sort int not null default 0,
   archived boolean not null default false,
-  unique (process_id, key)
+  unique (process_id, sheet, key)
 );
 
 -- ---------------------------------------------------------------- RCM, walkthroughs, tests
@@ -94,22 +119,21 @@ create table public.controls (
   -- denormalised from data for access checks, dashboards and test planning
   frequency text,
   test_frequency text,
+  risk_level text,
+  sample_size int,
+  sample_size_manual boolean not null default false,  -- true = typed in by an admin, not from the master grid
   responsible_emails text[] not null default '{}',
   manager_emails text[] not null default '{}',
   is_key boolean,
   archived boolean not null default false,
-  status text not null default 'draft'
-    check (status in ('draft','pending_manager','pending_finance','approved','returned')),
-  submitted_by uuid, submitted_at timestamptz,
-  manager_by uuid, manager_at timestamptz,
-  finance_by uuid, finance_at timestamptz,
-  return_comment text,
+  sort int not null default 0,
   created_at timestamptz not null default now(),
   created_by uuid,
   updated_at timestamptz not null default now(),
-  updated_by uuid,
-  unique (process_id, control_ref)
+  updated_by uuid
 );
+-- a Control ID is unique among the active controls of a process (archived controls keep their old ID)
+create unique index controls_ref_active on public.controls (process_id, lower(control_ref)) where not archived;
 create index on public.controls (entity_id);
 create index on public.controls using gin (responsible_emails);
 create index on public.controls using gin (manager_emails);
@@ -145,6 +169,7 @@ create table public.tests (
   period_start date not null,
   period_end date not null,
   sample_size int,
+  sample_size_manual boolean not null default false,
   exceptions int,
   data jsonb not null default '{}',
   conclusion text check (conclusion in ('Effective','Effective with exceptions','Ineffective','Not tested')),
@@ -161,9 +186,9 @@ create table public.tests (
 );
 create index on public.tests (entity_id, fy);
 
--- ---------------------------------------------------------------- access, trail, files
+-- ---------------------------------------------------------------- access, trail, files, email
 -- A grant opens an entity (process_id null), one process (control_id null) or one control.
--- can_edit lets the user prepare/submit in that scope as if they were the responsible person.
+-- can_edit lets the user prepare/submit walkthroughs and tests in that scope like the responsible person.
 create table public.access_grants (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -177,7 +202,7 @@ create index on public.access_grants (user_id);
 
 create table public.workflow_events (
   id bigserial primary key,
-  record_type text not null check (record_type in ('control','walkthrough','test')),
+  record_type text not null check (record_type in ('walkthrough','test')),
   record_id uuid not null,
   control_id uuid not null,
   entity_id uuid not null,
@@ -231,3 +256,18 @@ create table public.uploads (
   uploaded_by uuid default auth.uid(),
   uploaded_at timestamptz not null default now()
 );
+
+create table public.email_log (
+  id uuid primary key default gen_random_uuid(),
+  entity_id uuid references public.entities(id) on delete set null,
+  to_emails text[] not null,
+  cc_emails text[] not null default '{}',
+  subject text not null,
+  processes text[] not null default '{}',
+  control_count int not null default 0,
+  status text not null default 'sent',
+  error text,
+  sent_by uuid default auth.uid(),
+  sent_at timestamptz not null default now()
+);
+create index on public.email_log (entity_id, sent_at desc);

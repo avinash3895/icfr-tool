@@ -14,18 +14,67 @@ export const COLUMN_TYPES = [
   { id: 'emails', label: 'Email address(es)' },
 ];
 
-// System columns every process has. They can be renamed and reordered, not deleted.
-export const SYSTEM_COLUMNS = [
-  { key: 'control_id', label: 'Control ID', type: 'text', required: true, help: 'Unique within the process, e.g. P2P-01. Used to match rows when an Excel file is uploaded.' },
-  { key: 'control_description', label: 'Control Description', type: 'longtext', required: true },
-  { key: 'key_control', label: 'Key Control', type: 'yesno', options: ['Yes', 'No'] },
-  { key: 'frequency', label: 'Control Frequency', type: 'select', options: CONTROL_FREQUENCIES, required: true, help: 'How often the control operates. Drives the suggested sample size.' },
-  { key: 'test_frequency', label: 'Testing Frequency', type: 'select', options: TEST_FREQUENCIES, help: 'How often the control is tested. Blank = Quarterly (Annual for annual controls).' },
-  { key: 'responsible', label: 'Responsible Person(s)', type: 'emails', required: true, help: 'One or more emails, separated by ";". They prepare and submit.' },
-  { key: 'manager', label: 'Manager / Reviewer', type: 'emails', help: 'Email(s) of the manager who signs off before finance.' },
+export const WALKTHROUGH_CONCLUSIONS = ['Effective', 'Ineffective', 'Not concluded'];
+export const TEST_CONCLUSIONS = ['Effective', 'Effective with exceptions', 'Ineffective', 'Not tested'];
+export const DEFAULT_RISKS = ['Low', 'Medium', 'High'];
+
+export const SHEETS = [
+  { id: 'rcm', label: 'RCM' },
+  { id: 'walkthrough', label: 'Walkthrough' },
+  { id: 'test', label: 'Testing' },
 ];
 
-// Optional columns offered when creating a process
+// System columns of each sheet. They can be renamed and reordered, not deleted.
+export const SYSTEM_COLUMNS = {
+  rcm: [
+    { key: 'control_id', label: 'Control ID', type: 'text', required: true, help: 'The control number, e.g. P2P-01. To renumber a control, change it here; the Existing Control ID column in Excel tells the app which control it was.' },
+    { key: 'control_description', label: 'Control Description', type: 'longtext', required: true },
+    { key: 'key_control', label: 'Key Control', type: 'yesno', options: ['Yes', 'No'] },
+    { key: 'risk_level', label: 'Risk Level', type: 'select', options: DEFAULT_RISKS, required: true, help: 'With the control frequency, decides the sample size from the master.' },
+    { key: 'frequency', label: 'Control Frequency', type: 'select', options: CONTROL_FREQUENCIES, required: true, help: 'How often the control operates.' },
+    { key: 'test_frequency', label: 'Testing Frequency', type: 'select', options: TEST_FREQUENCIES, help: 'How often the control is tested. Blank = Quarterly (Annual for annual / semi-annual controls).' },
+    { key: 'sample_size', label: 'Sample Size', type: 'number', help: 'Filled from the sample size master (frequency x risk). Type a number to override it for this control; clear it to go back to the master.' },
+    { key: 'responsible', label: 'Responsible Person(s)', type: 'emails', required: true, help: 'One or more emails, separated by ";". They prepare and submit walkthroughs and tests.' },
+    { key: 'manager', label: 'Manager / Reviewer', type: 'emails', help: 'Email(s) of the manager who signs off before finance.' },
+  ],
+  walkthrough: [
+    { key: 'walkthrough_date', label: 'Walkthrough Date', type: 'date' },
+    { key: 'participants', label: 'People Involved', type: 'text' },
+    { key: 'procedure', label: 'Walkthrough Performed', type: 'longtext', required: true, help: 'How one transaction was followed from start to end.' },
+    { key: 'documents', label: 'Documents Inspected', type: 'longtext' },
+    { key: 'design_notes', label: 'Design Assessment', type: 'longtext' },
+    { key: 'conclusion', label: 'Conclusion', type: 'select', options: WALKTHROUGH_CONCLUSIONS, required: true, system: true, lockOptions: true },
+  ],
+  test: [
+    { key: 'sample_size', label: 'Sample Size', type: 'number', system: true, help: 'Comes from the RCM. Only admins can change it.' },
+    { key: 'test_date', label: 'Date Tested', type: 'date' },
+    { key: 'population', label: 'Population Size', type: 'number' },
+    { key: 'procedure', label: 'Test Procedure Performed', type: 'longtext', required: true },
+    { key: 'samples', label: 'Samples Selected', type: 'longtext', help: 'One sample per line, e.g. invoice numbers or dates.' },
+    { key: 'exceptions', label: 'Exceptions Found', type: 'number', system: true },
+    { key: 'exception_details', label: 'Exception Details', type: 'longtext' },
+    { key: 'conclusion', label: 'Conclusion', type: 'select', options: TEST_CONCLUSIONS, required: true, system: true, lockOptions: true },
+  ],
+};
+// columns that are always system columns (cannot be removed)
+export const SYSTEM_KEYS = {
+  rcm: SYSTEM_COLUMNS.rcm.map((c) => c.key),
+  walkthrough: ['conclusion'],
+  test: ['sample_size', 'exceptions', 'conclusion'],
+};
+// columns whose list values are fixed by the app
+export const LOCKED_OPTIONS = { walkthrough: ['conclusion'], test: ['conclusion'], rcm: ['risk_level', 'frequency', 'test_frequency', 'key_control'] };
+
+export function defaultColumns(sheet, risks = DEFAULT_RISKS) {
+  return SYSTEM_COLUMNS[sheet].map((c) => ({
+    ...c,
+    options: c.key === 'risk_level' ? risks : c.options || [],
+    required: !!c.required,
+    system: SYSTEM_KEYS[sheet].includes(c.key),
+  }));
+}
+
+// Optional RCM columns offered when creating a process
 export const SUGGESTED_COLUMNS = [
   { key: 'sub_process', label: 'Sub-process', type: 'text' },
   { key: 'risk_id', label: 'Risk ID', type: 'text' },
@@ -49,28 +98,8 @@ export const STATUS = {
   approved: { label: 'Signed off', tone: 'green' },
 };
 
-export const WALKTHROUGH_CONCLUSIONS = ['Effective', 'Ineffective', 'Not concluded'];
-export const TEST_CONCLUSIONS = ['Effective', 'Effective with exceptions', 'Ineffective', 'Not tested'];
-
-export const WALKTHROUGH_FIELDS = [
-  { key: 'walkthrough_date', label: 'Walkthrough date', type: 'date' },
-  { key: 'participants', label: 'People involved', type: 'text' },
-  { key: 'procedure', label: 'Walkthrough performed', type: 'longtext', help: 'Describe how one transaction was followed from start to end.' },
-  { key: 'documents', label: 'Documents / evidence inspected', type: 'longtext' },
-  { key: 'design_notes', label: 'Design assessment', type: 'longtext', help: 'Does the control, as designed, address the risk?' },
-];
-
-export const TEST_FIELDS = [
-  { key: 'test_date', label: 'Date tested', type: 'date' },
-  { key: 'population', label: 'Population size', type: 'number' },
-  { key: 'procedure', label: 'Test procedure performed', type: 'longtext' },
-  { key: 'samples', label: 'Samples selected', type: 'longtext', help: 'List the sample items (one per line), e.g. invoice numbers or dates.' },
-  { key: 'exception_details', label: 'Exception details', type: 'longtext' },
-];
-
 export const ROLES = {
-  admin: 'Admin',
-  finance: 'Finance',
+  admin: 'Admin (finance)',
   user: 'User',
   viewer: 'Viewer / Auditor',
 };
@@ -148,10 +177,10 @@ export function displayValue(col, v) {
 }
 
 // Normalise any input (form or Excel) to how it is stored. Returns { value, error }.
-export function normalizeValue(col, raw) {
+export function normalizeValue(col, raw, enforceRequired = true) {
   const blank = raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '') || (Array.isArray(raw) && raw.length === 0);
   if (blank) {
-    if (col.required) return { value: col.type === 'emails' || col.type === 'multiselect' ? [] : '', error: `${col.label} is required` };
+    if (col.required && enforceRequired) return { value: col.type === 'emails' || col.type === 'multiselect' ? [] : '', error: `${col.label} is required` };
     return { value: col.type === 'emails' || col.type === 'multiselect' ? [] : '' };
   }
   const opts = col.options || [];

@@ -21,12 +21,13 @@ export function computeStats({ controls, walkthroughs, tests }) {
   const due = t.filter((x) => x.period_start <= today);
   const overdue = t.filter((x) => x.period_end < today && x.status !== 'approved');
 
-  const pending = [...active, ...w, ...t].filter((x) => x.status === 'pending_manager' || x.status === 'pending_finance').length;
+  const pending = [...w, ...t].filter((x) => x.status === 'pending_manager' || x.status === 'pending_finance').length;
 
   return {
     controls: active.length,
     keyControls: active.filter((c) => c.is_key).length,
-    rcmStatus: countBy(active, (c) => c.status),
+    highRisk: active.filter((c) => /high|critical/i.test(c.risk_level || '')).length,
+    noSample: active.filter((c) => c.sample_size == null).length,
     walk: { total: w.length, status: countBy(w, (x) => x.status), conclusion: countBy(w.filter((x) => x.status === 'approved'), (x) => x.conclusion || 'None'), approved: w.filter((x) => x.status === 'approved').length },
     test: {
       total: t.length,

@@ -40,7 +40,7 @@ export function useLoad(fn, deps) {
 export function rightsOn(control, profile) {
   if (!control || !profile) return {};
   const email = profile.email;
-  const staff = profile.role === 'admin' || profile.role === 'finance';
+  const staff = profile.role === 'admin';
   const viewer = profile.role === 'viewer';
   const responsible = (control.responsible_emails || []).includes(email);
   const manager = (control.manager_emails || []).includes(email);

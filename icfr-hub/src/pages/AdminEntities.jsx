@@ -4,6 +4,16 @@ import { saveEntity, deleteEntity } from '../lib/api';
 import { MONTHS } from '../lib/util';
 import { Modal, Field, Empty, PromptModal, useToast } from '../components/ui';
 
+export function SetupTabs({ on }) {
+  return (
+    <div className="tabs">
+      <a className={`tab-link ${on === 'entities' ? 'on' : ''}`} href="#/admin/entities">Entities</a>
+      <a className={`tab-link ${on === 'samples' ? 'on' : ''}`} href="#/admin/samples">Sample size master</a>
+      <a className={`tab-link ${on === 'users' ? 'on' : ''}`} href="#/admin/users">Users &amp; access</a>
+    </div>
+  );
+}
+
 export default function AdminEntities() {
   const { entities, isAdmin, refresh } = useApp();
   const toast = useToast();
@@ -13,6 +23,7 @@ export default function AdminEntities() {
 
   return (
     <div className="page">
+      <SetupTabs on="entities" />
       <div className="page-head">
         <div>
           <h1>Entities</h1>

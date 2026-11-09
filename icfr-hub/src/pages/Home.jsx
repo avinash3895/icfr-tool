@@ -63,8 +63,8 @@ export default function Home() {
                   <div><b>{pct(s.test.dueApproved, s.test.due)}%</b><span>tests due done</span></div>
                   <div className={s.issues ? 'bad' : ''}><b>{s.issues}</b><span>ineffective</span></div>
                 </div>
-                <div className="ec-bar-label small muted">RCM sign-off</div>
-                <Progress parts={statusParts(s.rcmStatus)} />
+                <div className="ec-bar-label small muted">Walkthrough sign-off</div>
+                <Progress parts={statusParts(s.walk.status)} />
               </>
             )}
           </button>
@@ -79,7 +79,7 @@ export default function Home() {
               <thead>
                 <tr>
                   <th>Entity</th><th>Year</th><th className="num">Controls</th><th className="num">Key</th>
-                  <th className="num">RCM signed off</th><th className="num">Walkthroughs signed off</th>
+                  <th className="num">High risk</th><th className="num">Walkthroughs signed off</th>
                   <th className="num">Tests due / signed off</th><th className="num">Overdue</th>
                   <th className="num">Awaiting sign-off</th><th className="num">Ineffective</th>
                 </tr>
@@ -91,7 +91,7 @@ export default function Home() {
                     <td>{fyLabel(fy, e.fy_end_month)}</td>
                     <td className="num">{s.controls}</td>
                     <td className="num">{s.keyControls}</td>
-                    <td className="num">{s.rcmStatus.approved || 0} ({pct(s.rcmStatus.approved || 0, s.controls)}%)</td>
+                    <td className="num">{s.highRisk}</td>
                     <td className="num">{s.walk.approved} / {s.walk.total}</td>
                     <td className="num">{s.test.due} / {s.test.dueApproved}</td>
                     <td className={`num ${s.test.overdue ? 'tone-text-red' : ''}`}>{s.test.overdue}</td>

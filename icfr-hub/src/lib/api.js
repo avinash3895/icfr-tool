@@ -68,21 +68,23 @@ export async function getProcess(id) {
   return must(await sb.from('processes').select('*').eq('id', id).single());
 }
 
-export async function listColumns(processId, includeArchived = false) {
+export async function listColumns(processId, includeArchived = false, sheet = 'rcm') {
   let q = sb.from('process_columns').select('*').eq('process_id', processId).order('sort');
+  if (sheet) q = q.eq('sheet', sheet);
   if (!includeArchived) q = q.eq('archived', false);
   return must(await q);
 }
 
+// columns: { rcm: [...], walkthrough: [...], test: [...] }
 export async function createProcess(p, columns) {
   const proc = must(await sb.from('processes').insert({
     entity_id: p.entity_id, code: p.code, name: p.name, description: p.description || null,
     owner_name: p.owner_name || null, owner_email: p.owner_email || null, sort: p.sort ?? 0,
   }).select().single());
-  const rows = columns.map((c, i) => ({
-    process_id: proc.id, key: c.key, label: c.label, type: c.type, options: c.options || [],
+  const rows = Object.entries(columns).flatMap(([sheet, cols]) => cols.map((c, i) => ({
+    process_id: proc.id, sheet, key: c.key, label: c.label, type: c.type, options: c.options || [],
     required: !!c.required, system: !!c.system, help: c.help || null, sort: i + 1,
-  }));
+  })));
   must(await sb.from('process_columns').insert(rows));
   return proc;
 }
@@ -96,8 +98,8 @@ export async function deleteProcess(id) {
 }
 
 // Saves the whole column list of a process (existing ids are updated, new ones inserted, removed ones archived)
-export async function saveColumns(processId, columns) {
-  const existing = await listColumns(processId, true);
+export async function saveColumns(processId, sheet, columns) {
+  const existing = await listColumns(processId, true, sheet);
   const keep = new Set();
   for (let i = 0; i < columns.length; i++) {
     const c = columns[i];
@@ -112,7 +114,7 @@ export async function saveColumns(processId, columns) {
         keep.add(old.id);
         must(await sb.from('process_columns').update(row).eq('id', old.id));
       } else {
-        must(await sb.from('process_columns').insert({ ...row, process_id: processId, key: c.key, system: false }));
+        must(await sb.from('process_columns').insert({ ...row, process_id: processId, sheet, key: c.key, system: false }));
       }
     }
   }
@@ -124,10 +126,10 @@ export async function saveColumns(processId, columns) {
 }
 
 // ---------------------------------------------------------------- controls
-const CONTROL_FIELDS = 'id, entity_id, process_id, control_ref, data, frequency, test_frequency, responsible_emails, manager_emails, is_key, archived, status, submitted_by, submitted_at, manager_by, manager_at, finance_by, finance_at, return_comment, updated_at, updated_by';
+const CONTROL_FIELDS = 'id, entity_id, process_id, control_ref, data, frequency, test_frequency, risk_level, sample_size, sample_size_manual, responsible_emails, manager_emails, is_key, archived, sort, updated_at, updated_by';
 
 export async function listControls({ entityId, processId, includeArchived = false } = {}) {
-  let q = sb.from('controls').select(CONTROL_FIELDS).order('control_ref');
+  let q = sb.from('controls').select(CONTROL_FIELDS).order('sort').order('control_ref');
   if (entityId) q = q.eq('entity_id', entityId);
   if (processId) q = q.eq('process_id', processId);
   if (!includeArchived) q = q.eq('archived', false);
@@ -138,16 +140,16 @@ export async function getControl(id) {
   return must(await sb.from('controls').select(CONTROL_FIELDS).eq('id', id).single());
 }
 
-export async function saveControl(processId, id, data) {
-  return must(await sb.rpc('save_control', { p_process_id: processId, p_id: id || null, p_data: data }));
+export async function saveControl(processId, id, data, sort) {
+  return must(await sb.rpc('save_control', { p_process_id: processId, p_id: id || null, p_data: data, p_sort: sort ?? null }));
 }
 
 export async function archiveControl(id, archived) {
   must(await sb.rpc('archive_control', { p_id: id, p_archived: archived }));
 }
 
-export async function applyUpload(processId, rows, fileName, path) {
-  return must(await sb.rpc('apply_rcm_upload', { p_process_id: processId, p_rows: rows, p_file_name: fileName, p_path: path || null }));
+export async function applyUpload(processId, rows, archiveIds, fileName, path) {
+  return must(await sb.rpc('apply_rcm_upload', { p_process_id: processId, p_rows: rows, p_archive: archiveIds || [], p_file_name: fileName, p_path: path || null }));
 }
 
 export async function wfAction(type, id, action, comment) {
@@ -195,24 +197,19 @@ export async function listTests({ entityId, fy, controlId }) {
 
 export async function listOpenWork() {
   const st = ['draft', 'returned', 'pending_manager', 'pending_finance'];
-  const [controls, walkthroughs, tests] = await Promise.all([
-    must(await sb.from('controls').select(CONTROL_FIELDS).in('status', st).eq('archived', false)),
+  const [walkthroughs, tests] = await Promise.all([
     must(await sb.from('walkthroughs').select('*').in('status', st)),
     must(await sb.from('tests').select('*').in('status', st)),
   ]);
-  return { controls, walkthroughs, tests };
+  return { walkthroughs, tests };
 }
 
-export async function saveWalkthrough(controlId, fy, data, conclusion) {
-  return must(await sb.rpc('save_walkthrough', { p_control_id: controlId, p_fy: fy, p_data: data, p_conclusion: conclusion || null }));
+export async function saveWalkthrough(controlId, fy, data) {
+  return must(await sb.rpc('save_walkthrough', { p_control_id: controlId, p_fy: fy, p_data: data }));
 }
 
-export async function saveTest(id, data, conclusion, sampleSize, exceptions) {
-  return must(await sb.rpc('save_test', {
-    p_id: id, p_data: data, p_conclusion: conclusion || null,
-    p_sample_size: sampleSize === '' || sampleSize == null ? null : Number(sampleSize),
-    p_exceptions: exceptions === '' || exceptions == null ? null : Number(exceptions),
-  }));
+export async function saveTest(id, data) {
+  return must(await sb.rpc('save_test', { p_id: id, p_data: data }));
 }
 
 export async function generateTestPlan(entityId, fy) {
@@ -279,4 +276,33 @@ export async function getRecord(kind, id) {
 export async function getControls(ids) {
   if (!ids.length) return [];
   return must(await sb.from('controls').select(CONTROL_FIELDS).in('id', ids));
+}
+
+// ---------------------------------------------------------------- sample size master
+export async function getSampleMatrix() {
+  const row = must(await sb.from('app_settings').select('*').eq('key', 'sample_matrix').maybeSingle());
+  return row?.value || { risks: ['Low', 'Medium', 'High'], sizes: {} };
+}
+
+export async function applySampleMatrix(matrix) {
+  return must(await sb.rpc('apply_sample_matrix', { p_matrix: matrix }));
+}
+
+// ---------------------------------------------------------------- email
+export async function sendEmail(payload) {
+  const { data, error } = await sb.functions.invoke('send-email', { body: payload });
+  if (error) {
+    let msg = error.message;
+    try {
+      const body = await error.context?.json?.();
+      if (body?.error) msg = body.error;
+    } catch { /* keep message */ }
+    throw new Error(msg);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+export async function listEmails(entityId) {
+  return must(await sb.from('email_log').select('*').eq('entity_id', entityId).order('sent_at', { ascending: false }).limit(100));
 }

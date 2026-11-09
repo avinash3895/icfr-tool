@@ -15,10 +15,10 @@ language sql stable security definer set search_path = public as $$
   select coalesce(public.my_role() = 'admin', false)
 $$;
 
--- admin + finance: see everything, edit everything, give the final sign-off
+-- admins (the finance team): see everything, maintain the RCM, give the final sign-off
 create or replace function public.is_staff() returns boolean
 language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','finance'), false)
+  select coalesce(public.my_role() = 'admin', false)
 $$;
 
 -- Does any grant of mine cover this control? (edit_only: only grants with can_edit)
@@ -94,16 +94,6 @@ language sql stable security definer set search_path = public as $$
   )
 $$;
 
--- Can I add a brand-new control to this process? (staff, or an edit grant on the whole entity/process)
-create or replace function public.can_add_control(p_process uuid) returns boolean
-language sql stable security definer set search_path = public as $$
-  select public.is_staff() or exists (
-    select 1 from public.processes p join public.access_grants g on g.entity_id = p.entity_id
-    where p.id = p_process and g.user_id = auth.uid() and g.can_edit and g.control_id is null
-      and (g.process_id is null or g.process_id = p.id)
-  )
-$$;
-
 -- ---------------------------------------------------------------- RLS
 alter table public.profiles enable row level security;
 alter table public.entities enable row level security;
@@ -117,6 +107,8 @@ alter table public.workflow_events enable row level security;
 alter table public.audit_log enable row level security;
 alter table public.attachments enable row level security;
 alter table public.uploads enable row level security;
+alter table public.app_settings enable row level security;
+alter table public.email_log enable row level security;
 
 -- profiles: everyone signed in can see the directory (names for sign-off trails); only admins change it
 create policy profiles_read on public.profiles for select to authenticated using (public.my_role() is not null or id = auth.uid());
@@ -151,3 +143,9 @@ create policy att_delete on public.attachments for delete to authenticated
 create policy uploads_read on public.uploads for select to authenticated using (public.is_staff() or uploaded_by = auth.uid());
 create policy uploads_insert on public.uploads for insert to authenticated
   with check (uploaded_by = auth.uid() and public.can_view_entity(entity_id));
+
+create policy settings_read on public.app_settings for select to authenticated using (true);
+create policy settings_admin on public.app_settings for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+create policy email_read on public.email_log for select to authenticated using (public.is_admin());
+create policy email_insert on public.email_log for insert to authenticated with check (public.is_admin());
