@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { RailSlotCtx, useApp, useLoad } from '../lib/app';
 import { listProcesses } from '../lib/api';
 import { currentFY, fyLabel } from '../lib/util';
-import { Spinner, ErrorBox, Empty } from '../components/ui';
+import { Spinner, ErrorBox, Empty, Icon } from '../components/ui';
 import Dashboard from './Dashboard';
 import Processes from './Processes';
 import ProcessRcm from './ProcessRcm';
@@ -45,7 +45,7 @@ export default function EntityPage({ entityId, rest }) {
   else if (section === 'activity') body = <Activity {...ctx} />;
   else body = <Dashboard {...ctx} />;
 
-  const link = (path, label, on) => <a href={`#/e/${entityId}${path}`} className={on ? 'on' : ''}>{label}</a>;
+  const link = (path, label, on, icon) => <a href={`#/e/${entityId}${path}`} className={on ? 'on' : ''}><Icon name={icon} />{label}</a>;
 
   const railContent = (
     <div className="rail-entity">
@@ -56,12 +56,12 @@ export default function EntityPage({ entityId, rest }) {
         </select>
       </label>
       <nav className="rail-nav sub">
-        {link('', 'Dashboard', !section)}
-        {link('/processes', 'Processes', section === 'processes')}
-        {link('/testing', 'Walkthroughs & testing', section === 'testing')}
-        {link('/activity', 'Uploads & activity', section === 'activity')}
+        {link('', 'Dashboard', !section, 'dashboard')}
+        {link('/processes', 'Processes', section === 'processes', 'processes')}
+        {link('/testing', 'Walkthroughs & testing', section === 'testing', 'testing')}
+        {link('/activity', 'Uploads & activity', section === 'activity', 'activity')}
       </nav>
-      <div className="rail-heading">Process binders</div>
+      <div className="rail-heading">Processes</div>
       <nav className="rail-tabs">
         {processes.map((p, i) => (
           <a key={p.id} href={`#/e/${entityId}/p/${p.id}`} className={pid === p.id ? 'on' : ''} title={p.name} style={{ '--tab': `var(--tab-${i % 6})` }}>

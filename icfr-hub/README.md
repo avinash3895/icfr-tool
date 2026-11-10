@@ -51,6 +51,14 @@ Sample Size: keep the master value or leave it empty to use the master; another 
 On **Walkthroughs & testing**, **Download Excel** gives the selected process for the selected year: one sheet for the walkthrough and one per test period (Q1…Q4 etc.), with grey information columns and the white columns of the testing template.
 Responsible people fill it and **Upload Excel**: rows are matched by Control ID; only rows they may edit (Draft / Sent back, their controls) can change; Sample Size can only be changed by admins. Uploading saves the work; each row is then submitted on the website.
 
+### AI assistant
+
+"Ask AI" (bottom right, or Ctrl/Cmd+K) is a chat that can do what the signed-in person could do by hand: create entities and processes, change templates, add or load controls from an attached Excel/CSV, set up the testing year, fill walkthroughs and tests, submit and sign off, set sample sizes, add users, download Excel, open pages and answer questions about the data.
+
+- Admins connect a provider under **Setup → AI assistant**: Anthropic Claude, or anything OpenAI-compatible (OpenAI, Gemini, OpenRouter, Groq, a company endpoint). Several can be saved; one is active.
+- API keys live in `icfr_ai_providers`, which has no access policies; only the `icfr-ai` edge function reads it. The browser never gets a key back.
+- The function only relays the chat. Every action runs in the browser with the person's own login, so access rules and the audit trail apply as usual. Removals always ask first; "Ask me before it changes anything" makes every change ask.
+
 ### Email
 
 Built and working up to the send step, but **not connected to a mailbox yet** (placeholder). When the company mailbox is ready, set the `ICFR_RESEND_API_KEY` and `ICFR_MAIL_FROM` secrets on the `icfr-send-email` function, or replace its send step with the company mail service.
@@ -63,6 +71,8 @@ icfr-hub/
                          0002_access.sql    access functions + row-level security
                          0003_workflow.sql  save functions, sample sizes, Excel upload, sign-off, test plan, audit trail
                          0004_storage.sql   private buckets "evidence" and "uploads"
+                         0005_hardening.sql functions callable by signed-in users only
+                         0006_ai.sql        AI provider settings (server-only table)
   supabase/functions/admin-users/           create users / set passwords (admin only)
   supabase/functions/send-email/            sends emails with Excel attachments through Resend (admin only)
   src/lib/        api.js (all database calls), excel.js (download/upload), util.js, stats.js, app.js
@@ -73,7 +83,7 @@ icfr-hub/
 ## Where it runs
 
 - **Database, login, files, functions:** the existing Supabase project **studio-admin** (`ybagmgjseignnyleovee`). Everything ICFR uses is prefixed so nothing else in that project is touched:
-  tables and functions `icfr_*` in `public`, storage buckets `icfr-evidence` and `icfr-uploads`, edge functions `icfr-admin-users` and `icfr-send-email`. No trigger was added to the shared login table.
+  tables and functions `icfr_*` in `public`, storage buckets `icfr-evidence` and `icfr-uploads`, edge functions `icfr-admin-users`, `icfr-send-email` and `icfr-ai`. No trigger was added to the shared login table.
 - The login is shared with the other studio apps, but a login only gets into ICFR Hub when it has an `icfr_profiles` row.
 - **First admin:** open the website; while there is no ICFR admin, the sign-in page shows “First time here? Set up ICFR Hub”. That creates your admin login (or links an existing one with its current password). After that the option disappears.
 - **Website:** Vite + React, deployed to Vercel. `.env.production` holds the public Supabase URL and publishable key.
@@ -81,5 +91,5 @@ icfr-hub/
 ## Setting it up again elsewhere
 
 1. Run the four files in `supabase/migrations/` in order.
-2. Deploy `supabase/functions/icfr-admin-users` and `icfr-send-email` (JWT verification off; they check the user themselves).
+2. Deploy `supabase/functions/icfr-admin-users`, `icfr-send-email` and `icfr-ai` (JWT verification off; they check the user themselves).
 3. Put the project URL and publishable key in `.env.production`, build (`npm install && npm run build`) and deploy `dist/` (Vercel: root directory `icfr-hub`, framework Vite).

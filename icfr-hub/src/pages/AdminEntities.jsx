@@ -10,6 +10,7 @@ export function SetupTabs({ on }) {
       <a className={`tab-link ${on === 'entities' ? 'on' : ''}`} href="#/admin/entities">Entities</a>
       <a className={`tab-link ${on === 'samples' ? 'on' : ''}`} href="#/admin/samples">Sample size master</a>
       <a className={`tab-link ${on === 'users' ? 'on' : ''}`} href="#/admin/users">Users &amp; access</a>
+      <a className={`tab-link ${on === 'ai' ? 'on' : ''}`} href="#/admin/ai">AI assistant</a>
     </div>
   );
 }

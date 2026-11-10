@@ -35,6 +35,11 @@ export function useLoad(fn, deps) {
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
+  // the AI assistant announces its changes so open pages refresh themselves
+  useEffect(() => {
+    window.addEventListener('icfr:changed', reload);
+    return () => window.removeEventListener('icfr:changed', reload);
+  }, [reload]);
   return { ...state, reload };
 }
 

@@ -5,6 +5,7 @@ import { Logo } from '../components/ui';
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -74,7 +75,7 @@ export default function Login() {
         </div>
         <div className="field">
           <label htmlFor="pw">Password</label>
-          <input id="pw" type="password" autoComplete={setup ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={setup ? 8 : undefined} />
+          <div className="pw-wrap"><input id="pw" type={showPw ? 'text' : 'password'} autoComplete={setup ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={setup ? 8 : undefined} /><button type="button" onClick={() => setShowPw((v) => !v)}>{showPw ? 'Hide' : 'Show'}</button></div>
         </div>
         {err && <div className="error-box">{err}</div>}
         <button className="btn primary full" disabled={busy}>{busy ? 'Please wait…' : setup ? 'Create admin and sign in' : 'Sign in'}</button>
