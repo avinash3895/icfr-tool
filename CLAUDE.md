@@ -1,0 +1,87 @@
+# ICFR Portal
+
+An internal portal for managing ICFR (internal control over financial reporting): process narratives, the risk and control matrix (RCM), and testing of controls (TOC).
+
+## What is in this folder
+
+- `prototype/` holds six HTML mock-ups, one per page. They are the visual reference for the look and feel. Open each one in a browser.
+- The mock-ups use sample data and scripted behaviour only. Nothing is saved and there is no backend.
+- Each mock-up was drawn at a small fixed width (480px). Treat them as a design reference, not as code to ship. Rebuild the pages properly, responsive, in the real stack, and keep the same layout, colours and behaviour.
+
+| File | Page |
+| --- | --- |
+| `01-signin.html` | Sign in |
+| `02-dashboard.html` | Dashboard |
+| `03-process-narrative.html` | Process narrative |
+| `04-rcm.html` | RCM |
+| `05-templates.html` | Templates |
+| `06-toc.html` | TOC (test of controls) |
+
+## Build order
+
+1. First, the look and feel of every page (this is what the prototype shows).
+2. Then functionality, page by page, with a real data model and storage.
+
+Do not add features beyond what is listed here without asking.
+
+## Style
+
+- Professional navy palette. Main navy `#1f3a5f`, page background `#eef2f7`, borders `#d5dde8`, text `#1f2d3d`, muted text `#6b7a90`.
+- No green and no yellow anywhere. Status pills: navy filled for good or done, light blue for neutral, grey for not started, soft red for exception or returned, soft amber only for "due soon" on the dashboard.
+- Font stack: Interstate, then Segoe UI, Arial, sans-serif.
+- Keep every page simple. Show only the essentials (for example no status or date columns on lists unless asked).
+- Never use real company or business-segment names. Use generic placeholders.
+
+## Shared layout
+
+- Navy sidebar on the left with: Dashboard, Process narrative, RCM, TOC, Templates. No Walkthrough module. No Settings link in the sidebar.
+- The sidebar collapses to a narrow rail showing letter icons, using an arrow toggle. It collapses automatically when a detail view opens.
+- At the bottom of the sidebar is a round avatar with the user's initial plus name and role. Clicking it opens a small menu with Settings and Log out.
+- Every page after sign in has an AI assistant box at the bottom right. It collapses and expands like a chat box. The Process narrative one is agentic (see below). The others are plain chat for now.
+
+## Pages
+
+### 1. Sign in
+Very simple. A centred box with logo text, Email, Password and a Sign in button. No SSO.
+
+### 2. Dashboard
+KPI cards (controls, tested %, open issues, overdue), testing progress bars per process, and a "My actions" list.
+
+### 3. Process narrative
+- First a list of existing processes (process name and owner only). Click one to open it.
+- Inside a process it is a Word-like document editor with a minimal toolbar: block style (normal, headings), font, size, bold, italic, underline, text colour, left, centre and justified alignment, bullet and numbered lists.
+- The AI assistant is agentic, not just a chat box. It reads the RCM and the narrative, shows what it is doing step by step, then proposes changes. Nothing is applied until the user approves. Examples: draft a "Key controls" section from the RCM, find control gaps and offer to add draft controls to the RCM, with an Undo.
+
+### 4. RCM
+- First a list of processes with control counts. Click one to open its risk and control table.
+- Columns: Risk ID, Risk description, Control ID, Control description, Type, Nature, Frequency, Owner, Key, Assertions, Testing attributes, Actions.
+- Testing attributes are set per control (for example DoA, Sign-off). They feed the TOC page.
+- Users can add a control (row), edit or delete a control (with a confirm bar), add a column, rename a column and delete a column.
+
+### 5. Templates
+- Lists processes with where each is pushed to (PN, RCM, TOC).
+- "Create process" is a two-step flow: process name and owner, then choose where to create it (PN, RCM, TOC) and push to all.
+- A created process appears in Process narrative, RCM and TOC.
+- Deleting a template asks for confirmation and deletes everything linked to it: its narrative, RCM controls and TOC tests.
+
+### 6. TOC (test of controls)
+Mirrors the RCM structure.
+- List of processes, then the process's controls table with a Status column (Not tested, Effective, Exception), then a control detail page.
+- Control detail has: the editable testing procedure, one upload slot per testing attribute (attributes come from the RCM, evidence is uploaded per attribute), an "Exceptions noted" box, a conclusion dropdown (Not tested, Effective, Exception), Save and Submit.
+- Submit asks for a second confirmation and needs a conclusion first. Once submitted, the control is locked: nothing can be edited and uploads cannot be removed. Users cannot go back. A real build needs an admin-only unlock.
+- The list status shows the submitted state, for example "Effective · Submitted".
+
+## Open points for the real build
+
+- Roles and permissions (who can edit RCM, who can test, who can review or unlock).
+- Audit trail for submitted tests.
+- Where uploaded evidence is stored.
+- How the AI assistant is connected, and its limits (it proposes, a person approves).
+
+## Code layout (current build)
+
+- `index.html` loads React 18.3.1, ReactDOM and htm 3.1.1 from unpkg, then `assets/data.js` and `assets/app.js`. There is no build step; open `index.html` directly or serve the folder.
+- `assets/styles.css` holds every style. Colours are CSS variables at the top.
+- `assets/data.js` holds the sample data (processes, narratives, RCM rows, TOC tests). It lives in memory and resets on reload.
+- `assets/app.js` holds all pages and the shared layout. Routes use the URL hash: `#/dashboard`, `#/pn/<process>`, `#/rcm/<process>`, `#/toc/<process>/<control>`, `#/templates/new`.
+- Step 1 (look and feel) is done. Sign in accepts any email and password; there is no backend yet.
