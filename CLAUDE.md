@@ -88,16 +88,18 @@ Opened from the avatar menu (not the sidebar). An "AI assistant" card: provider 
 
 - Roles and permissions (who can edit RCM, who can test, who can review or unlock).
 - Audit trail for submitted tests.
-- Where uploaded evidence is stored.
 - Moving AI keys from the browser to a server (for example a Supabase or Vercel function) so users do not handle keys, with per-user limits and logging.
 
 ## Code layout (current build)
 
-- `index.html` loads React 18.3.1, ReactDOM and htm 3.1.1 from unpkg, then `assets/data.js` and `assets/app.js`. There is no build step; open `index.html` directly or serve the folder.
+- `index.html` loads React 18.3.1, ReactDOM, htm 3.1.1 and supabase-js 2.119.0 from unpkg, then the files in `assets/`. There is no build step; open `index.html` directly or serve the folder.
 - `assets/styles.css` holds every style. Colours are CSS variables at the top.
-- `assets/data.js` holds the sample data (processes, narratives, RCM rows, TOC tests). It lives in memory and resets on reload.
+- `assets/data.js` holds column defaults, the sample data used to seed the database, and helpers.
 - `assets/ai.js` holds the AI settings, the provider adapters (Anthropic, OpenAI and compatible, Gemini) and the agent's tools.
 - `assets/export.js` builds the Word and Excel files; docx 9.15.3 (unpkg) and SheetJS xlsx 0.18.5 (cdnjs) load only on export.
 - `assets/app.js` holds all pages and the shared layout. Routes use the URL hash: `#/dashboard`, `#/pn/<process>`, `#/rcm/<process>`, `#/toc/<process>/<control>`, `#/templates/new`.
-- Step 1 (look and feel) is done, plus Settings, the AI agent and exports. Sign in accepts any email and password; portal data has no backend yet and resets on reload.
+- Data is saved in Supabase project ICFR-Tool (`cfqxeuedcbscnupgqxxw`). Sign-in is Supabase email and password. `assets/config.js` holds the project URL and publishable key; `assets/store.js` loads everything at sign-in and saves changes about half a second after each edit (only what changed). Tables: `icfr_processes` (with `rcm_columns`), `icfr_narratives`, `icfr_controls` (`values` jsonb), `icfr_tests`, `icfr_evidence`; files in the private `icfr-portal-evidence` bucket. Schema: `supabase/migrations/`.
+- The database enforces the test lock: submitted tests cannot be edited, un-submitted or have evidence added or removed, except by profiles with role `admin`. Only admins can change roles.
+- The project also holds older, empty tables from a previous version (`processes`, `controls`, `evidence` and others). The portal does not use them.
+- The dashboard's Overdue figure and My actions list are still sample data.
 - Hosted on Vercel, project `icfr-portal` (https://icfr-portal.vercel.app).

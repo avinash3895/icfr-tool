@@ -16,8 +16,8 @@
     { key: 'attrs', label: 'Testing attributes' }
   ];
 
-  var seq = 0;
-  function uid(p) { seq += 1; return (p || 'id') + '-' + seq + '-' + Math.random().toString(36).slice(2, 6); }
+  // Ids are UUIDs so rows can be saved to Supabase as they are.
+  function uid() { return crypto.randomUUID(); }
 
   // [riskId, riskDesc, controlId, controlDesc, type, nature, freq, owner, key, assertions, attrs, conclusion, exceptions]
   var CONTROLS = {

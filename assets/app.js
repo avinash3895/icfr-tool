@@ -42,10 +42,15 @@
     var s = useState(''), email = s[0], setEmail = s[1];
     var p = useState(''), pass = p[0], setPass = p[1];
     var er = useState(''), err = er[0], setErr = er[1];
+    var bs = useState(false), busy = bs[0], setBusy = bs[1];
     function submit(ev) {
       ev.preventDefault();
       if (!email.trim() || !pass) { setErr('Enter your email and password.'); return; }
-      props.onSignIn();
+      setBusy(true); setErr('');
+      props.onSignIn(email.trim(), pass).catch(function (x) {
+        setErr(/invalid login/i.test(x.message) ? 'Wrong email or password.' : x.message);
+        setBusy(false);
+      });
     }
     return html`<div className="signin">
       <form className="signin-box" onSubmit=${submit}>
@@ -53,7 +58,7 @@
         <input type="email" placeholder="Email" aria-label="Email" value=${email} onInput=${function (x) { setEmail(x.target.value); }} autoFocus />
         <input type="password" placeholder="Password" aria-label="Password" value=${pass} onInput=${function (x) { setPass(x.target.value); }} />
         ${err && html`<div className="signin-err">${err}</div>`}
-        <button className="btn" type="submit">Sign in</button>
+        <button className="btn" type="submit" disabled=${busy}>${busy ? 'Signing in…' : 'Sign in'}</button>
       </form>
     </div>`;
   }
@@ -66,7 +71,8 @@
       document.addEventListener('click', close);
       return function () { document.removeEventListener('click', close); };
     }, []);
-    var u = D.user;
+    var u = props.user || { name: 'User', role: '' };
+    var SAVE = { saved: 'All changes saved', saving: 'Saving…', error: 'Not saved' };
     return html`<nav className="side">
       <button className="side-toggle" aria-label=${props.collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         onClick=${function (ev) { ev.stopPropagation(); setMenu(false); props.setCollapsed(!props.collapsed); }}>${props.collapsed ? '›' : '‹'}</button>
@@ -77,6 +83,7 @@
             <span className="lbl">${n.label}</span><span className="ico">${n.ico}</span></a>`;
         })}
       </div>
+      <div className=${'save-state ' + props.saveState} title=${SAVE[props.saveState]}><i></i><span className="lbl">${SAVE[props.saveState]}</span></div>
       <button className="side-user" onClick=${function (ev) { ev.stopPropagation(); setMenu(!menu); }}>
         <span className="avatar">${u.name.charAt(0)}</span>
         <span className="lbl"><b>${u.name}</b><span>${u.role}</span></span>
@@ -214,7 +221,7 @@
       var db = dbRef.current, p = findProc(db, pid);
       runSteps(['Reading the narrative', 'Comparing steps with RCM controls', 'Checking for uncovered steps'], function () {
         busy.current = false;
-        var list = (D.gaps[pid] || D.genericGaps(p.name));
+        var list = (D.gaps[String(p.code).toLowerCase()] || D.genericGaps(p.name));
         var m = msg('ai', null);
         m.content = html`<span>Found ${list.length} gaps:
           <ol>${list.map(function (g, i) { return html`<li key=${i}>${g.gap}</li>`; })}</ol>
@@ -921,6 +928,7 @@
     var sv = useState(false), saved = sv[0], setSaved = sv[1];
     var as = useState(false), armed = as[0], setArmed = as[1];
     var file = useRef(null), target = useRef(null);
+    var us = useState(false), uploading = us[0], setUploading = us[1];
     var attrs = v.attrs || [];
 
     function save(extra) {
@@ -935,13 +943,28 @@
       save({ submitted: true });
       setArmed(false); setSaved(false); setNote('Submitted and locked. No further changes.');
     }
-    function addFiles(attr, files) {
-      if (locked || !files || !files.length) return;
-      var list = Array.prototype.map.call(files, function (f) { return { name: f.name, size: Math.max(1, Math.round(f.size / 1024)) + ' KB' }; });
-      props.mutate(function (d) {
-        var t = d.toc[row.id] || (d.toc[row.id] = D.blankTest(v));
-        t.uploads[attr] = (t.uploads[attr] || []).concat(list);
-      });
+    async function addFiles(attr, files) {
+      if (locked || uploading || !files || !files.length) return;
+      var list = Array.prototype.slice.call(files);
+      setUploading(true); setNote('Uploading ' + list.length + ' file' + (list.length === 1 ? '' : 's') + '…');
+      try {
+        await props.flushNow(); // the control must be saved before evidence can point to it
+        for (var i = 0; i < list.length; i++) {
+          var item = await window.ICFR_STORE.uploadEvidence(row.id, attr, list[i]);
+          props.mutate(function (d) {
+            var t = d.toc[row.id] || (d.toc[row.id] = D.blankTest(v));
+            t.uploads[attr] = (t.uploads[attr] || []).concat([item]);
+          });
+        }
+        setNote('');
+      } catch (x) {
+        setNote('Upload failed: ' + x.message);
+      } finally { setUploading(false); }
+    }
+    function openFile(f) {
+      if (!f.path) return;
+      window.ICFR_STORE.evidenceUrl(f.path).then(function (url) { window.open(url, '_blank', 'noopener'); })
+        .catch(function (x) { setNote('Could not open the file: ' + x.message); });
     }
     function removeFile(attr, i) {
       if (locked) return;
@@ -965,10 +988,10 @@
               onDrop=${function (x) { x.preventDefault(); addFiles(a, x.dataTransfer.files); }}>
             <div className="attr-h"><span className="name">${i + 1}. ${a}</span>
               <span className=${'pill ' + (files.length ? 'ok' : 'n')}>${files.length ? files.length + ' uploaded' : 'No document'}</span>
-              ${!locked && html`<button className="btn" onClick=${function () { target.current = a; file.current.click(); }}>Upload</button>`}
+              ${!locked && html`<button className="btn" disabled=${uploading} onClick=${function () { target.current = a; file.current.click(); }}>Upload</button>`}
             </div>
             ${files.map(function (f, j) {
-              return html`<div className="file" key=${j}><span>${f.name} · ${f.size}</span>
+              return html`<div className="file" key=${f.id || j}><span><button className="file-link" onClick=${function () { openFile(f); }}>${f.name}</button> · ${f.size}</span>
                 ${!locked && html`<button className="link dg" onClick=${function () { removeFile(a, j); }}>Remove</button>`}</div>`;
             })}
           </div>`;
@@ -994,8 +1017,14 @@
 
   /* ---------- App ---------- */
   function App() {
-    var ds = useState(D.build), db = ds[0], setDb = ds[1];
-    var ss = useState(store(true, 'icfr.signedIn') === '1'), signedIn = ss[0], setSignedIn = ss[1];
+    var S = window.ICFR_STORE;
+    var ds = useState(null), db = ds[0], setDb = ds[1];
+    var phs = useState('checking'), phase = phs[0], setPhase = phs[1]; // checking | signin | loading | ready | error
+    var les = useState(''), loadErr = les[0], setLoadErr = les[1];
+    var ups = useState(null), user = ups[0], setUser = ups[1];
+    var svs = useState('saved'), saveState = svs[0], setSaveState = svs[1];
+    var ses = useState(''), saveErr = ses[0], setSaveErr = ses[1];
+    var synced = useRef(null), timer = useRef(null), inflight = useRef(null);
     var rs = useState(parts()), route = rs[0], setRoute = rs[1];
     var cs = useState(narrow()), collapsed = cs[0], setCollapsed = cs[1];
     var fs = useState(''), flash = fs[0], setFlash = fs[1];
@@ -1003,7 +1032,58 @@
     var dbRef = useRef(db); dbRef.current = db;
     var as = useState(function () { return AI.loadConfig(); }), aiConfig = as[0], setAiConfig = as[1];
 
-    function mutate(fn) { setDb(function (d) { var n = clone(d); fn(n); return n; }); }
+    function mutate(fn) { setDb(function (d) { if (!d) return d; var n = clone(d); fn(n); return n; }); }
+
+    /* ---- Supabase: session, load, auto-save ---- */
+    async function start(authUser) {
+      setPhase('loading');
+      try {
+        var res = await Promise.all([S.loadAll(), S.profile(authUser)]);
+        synced.current = res[0];
+        setDb(res[0]); setUser(res[1]); setSaveState('saved'); setSaveErr('');
+        setPhase('ready');
+        if (!parts().length) go('dashboard');
+      } catch (x) { setLoadErr(x.message || String(x)); setPhase('error'); }
+    }
+    useEffect(function () {
+      S.session().then(function (sess) { if (sess) start(sess.user); else setPhase('signin'); })
+        .catch(function (x) { setLoadErr(x.message || String(x)); setPhase('error'); });
+      var sub = S.onAuth(function (ev) {
+        if (ev === 'SIGNED_OUT') { synced.current = null; setDb(null); setPhase('signin'); }
+      });
+      return function () { sub.data.subscription.unsubscribe(); };
+    }, []);
+    async function flush() {
+      clearTimeout(timer.current);
+      if (inflight.current) return inflight.current;
+      inflight.current = (async function () {
+        await null; // let the assignment above happen before the finally below clears it
+        try {
+          while (dbRef.current && synced.current && dbRef.current !== synced.current) {
+            var target = dbRef.current, ops = S.diff(synced.current, target);
+            if (!S.empty(ops)) await S.apply(ops);
+            synced.current = target;
+          }
+          setSaveState('saved'); setSaveErr('');
+        } catch (x) {
+          setSaveState('error'); setSaveErr(x.message || String(x));
+          throw x;
+        } finally { inflight.current = null; }
+      })();
+      return inflight.current;
+    }
+    function flushNow() { return flush(); }
+    useEffect(function () {
+      if (phase !== 'ready' || !db || db === synced.current) return;
+      setSaveState('saving');
+      clearTimeout(timer.current);
+      timer.current = setTimeout(function () { flush().catch(function () {}); }, 600);
+    }, [db]);
+    useEffect(function () {
+      function warn(ev) { if (dbRef.current && dbRef.current !== synced.current) { ev.preventDefault(); ev.returnValue = ''; } }
+      window.addEventListener('beforeunload', warn);
+      return function () { window.removeEventListener('beforeunload', warn); };
+    }, []);
 
     useEffect(function () {
       function onHash() { setRoute(parts()); }
@@ -1017,11 +1097,25 @@
     useEffect(function () { setCollapsed(detail || narrow()); }, [routeKey]);
     useEffect(function () { if (section !== 'templates') setFlash(''); }, [section]);
 
-    if (!signedIn) {
-      return html`<${SignIn} onSignIn=${function () { store(false, 'icfr.signedIn', '1'); setSignedIn(true); go('dashboard'); }} />`;
+    if (phase === 'signin') {
+      return html`<${SignIn} onSignIn=${async function (email, pass) { await S.signIn(email, pass); var sess = await S.session(); await start(sess.user); }} />`;
+    }
+    if (phase === 'checking' || phase === 'loading' || !db) {
+      return phase === 'error'
+        ? html`<div className="loader"><div><b>Could not load the portal data.</b><p className="mut">${loadErr}</p>
+            <button className="btn" onClick=${function () { location.reload(); }}>Try again</button></div></div>`
+        : html`<div className="loader">Loading…</div>`;
     }
 
-    function logout() { store(false, 'icfr.signedIn', '0'); setSignedIn(false); go(''); }
+    async function logout() {
+      try { await flush(); } catch (x) { /* keep going: the user chose to leave */ }
+      await S.signOut();
+      synced.current = null; setDb(null); setUser(null); setPhase('signin'); go('');
+    }
+    function reloadFromServer() {
+      clearTimeout(timer.current);
+      S.session().then(function (sess) { if (sess) start(sess.user); else setPhase('signin'); });
+    }
 
     function applyChange(fn) { mutate(fn); setDocVer(function (x) { return x + 1; }); }
     function setNarrative(pid, h) {
@@ -1109,7 +1203,7 @@
         ? html`<${ProcessList} db=${db} mod="TOC" base="toc" title="TOC" hint="Select a process to test its controls." second="Controls" secondValue=${count} />`
         : !tp ? html`<${NotFound} base="toc" label="TOC" />`
           : route[2] && !row ? html`<div><div className="bc"><a href=${'#/toc/' + tp.id}>‹ ${tp.name}</a></div><p className="mut">This control was not found. It may have been deleted from the RCM.</p></div>`
-            : row ? html`<${TocControl} key=${row.id + (db.toc[row.id] && db.toc[row.id].submitted ? ':s' : '')} db=${db} proc=${tp} row=${row} mutate=${mutate} />`
+            : row ? html`<${TocControl} key=${row.id + (db.toc[row.id] && db.toc[row.id].submitted ? ':s' : '')} db=${db} proc=${tp} row=${row} mutate=${mutate} flushNow=${flushNow} />`
               : html`<${TocProcess} db=${db} proc=${tp} />`;
       assistant = html`<${ChatAssistant} greeting="Hi, I can help plan tests, draft exceptions or spot missing evidence." />`;
     } else if (section === 'templates') {
@@ -1126,8 +1220,13 @@
     }
 
     return html`<div className=${'app' + (collapsed ? ' collapsed' : '')}>
-      <${Sidebar} section=${section} collapsed=${collapsed} setCollapsed=${setCollapsed} onLogout=${logout} />
-      <main className="main">${page}</main>
+      <${Sidebar} section=${section} collapsed=${collapsed} setCollapsed=${setCollapsed} onLogout=${logout} user=${user} saveState=${saveState} />
+      <main className="main">
+        ${saveState === 'error' && html`<div className="save-err"><span><b>Your last change was not saved.</b> ${saveErr}</span>
+          <button className="link" onClick=${function () { flush().catch(function () {}); }}>Retry</button>
+          <button className="link" onClick=${reloadFromServer}>Discard and reload</button></div>`}
+        ${page}
+      </main>
       ${AI.ready(aiConfig)
         ? html`<${AgentAssistant} config=${aiConfig} db=${db} applyChange=${applyChange}
             context=${{ section: section, pid: route[1] && route[1] !== 'new' ? route[1] : null, rowId: route[2] || null }} />`
