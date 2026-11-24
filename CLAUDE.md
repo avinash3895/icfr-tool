@@ -37,7 +37,7 @@ Do not add features beyond what is listed here without asking.
 - Navy sidebar on the left with: Dashboard, Process narrative, RCM, TOC, Templates. No Walkthrough module. No Settings link in the sidebar.
 - The sidebar collapses to a narrow rail showing letter icons, using an arrow toggle. It collapses automatically when a detail view opens.
 - At the bottom of the sidebar is a round avatar with the user's initial plus name and role. Clicking it opens a small menu with Settings and Log out.
-- Every page after sign in has an AI assistant box at the bottom right. It collapses and expands like a chat box. The Process narrative one is agentic (see below). The others are plain chat for now.
+- Every page after sign in has an AI assistant box at the bottom right. It collapses and expands like a chat box. Once a provider is set in Settings it is one agent on every page (see "AI assistant" below). Without a provider, Process narrative shows the scripted demo and the other pages point to Settings.
 
 ## Pages
 
@@ -71,17 +71,33 @@ Mirrors the RCM structure.
 - Submit asks for a second confirmation and needs a conclusion first. Once submitted, the control is locked: nothing can be edited and uploads cannot be removed. Users cannot go back. A real build needs an admin-only unlock.
 - The list status shows the submitted state, for example "Effective · Submitted".
 
+### 7. Settings
+Opened from the avatar menu (not the sidebar). An "AI assistant" card: provider (Anthropic, OpenAI, Google Gemini, OpenAI-compatible), API key, model, optional base URL, Save, Test connection, Remove. The key is kept in the browser's local storage and sent straight to the provider.
+
+### AI assistant (agent)
+- Works on every page and keeps its conversation while the user moves between pages. Each message tells it which page, process and control the user is on.
+- Read tools run on their own: list processes, read RCM, narrative and tests, open a page.
+- Write tools only propose: add, update or delete controls; add, rename or delete RCM columns; append to or replace a narrative; update a test's procedure, exceptions or conclusion; create a process. Each proposal is a card with Approve and Reject (and Approve all); applied changes have Undo.
+- It cannot submit tests, unlock submitted tests or delete processes. Submitted tests are locked for it too.
+
+### Export
+- Process narrative: Export to Word (.docx), keeping headings, bold, italic, underline, colour, alignment and lists.
+- RCM: Export Excel (.xlsx) and Export Word (.docx, landscape table), with the current columns.
+
 ## Open points for the real build
 
 - Roles and permissions (who can edit RCM, who can test, who can review or unlock).
 - Audit trail for submitted tests.
 - Where uploaded evidence is stored.
-- How the AI assistant is connected, and its limits (it proposes, a person approves).
+- Moving AI keys from the browser to a server (for example a Supabase or Vercel function) so users do not handle keys, with per-user limits and logging.
 
 ## Code layout (current build)
 
 - `index.html` loads React 18.3.1, ReactDOM and htm 3.1.1 from unpkg, then `assets/data.js` and `assets/app.js`. There is no build step; open `index.html` directly or serve the folder.
 - `assets/styles.css` holds every style. Colours are CSS variables at the top.
 - `assets/data.js` holds the sample data (processes, narratives, RCM rows, TOC tests). It lives in memory and resets on reload.
+- `assets/ai.js` holds the AI settings, the provider adapters (Anthropic, OpenAI and compatible, Gemini) and the agent's tools.
+- `assets/export.js` builds the Word and Excel files; docx 9.15.3 (unpkg) and SheetJS xlsx 0.18.5 (cdnjs) load only on export.
 - `assets/app.js` holds all pages and the shared layout. Routes use the URL hash: `#/dashboard`, `#/pn/<process>`, `#/rcm/<process>`, `#/toc/<process>/<control>`, `#/templates/new`.
-- Step 1 (look and feel) is done. Sign in accepts any email and password; there is no backend yet.
+- Step 1 (look and feel) is done, plus Settings, the AI agent and exports. Sign in accepts any email and password; portal data has no backend yet and resets on reload.
+- Hosted on Vercel, project `icfr-portal` (https://icfr-portal.vercel.app).

@@ -82,7 +82,7 @@
         <span className="lbl"><b>${u.name}</b><span>${u.role}</span></span>
       </button>
       ${menu && html`<div className="user-menu" onClick=${function (ev) { ev.stopPropagation(); }}>
-        <button onClick=${function () { setMenu(false); }}>Settings</button>
+        <button onClick=${function () { setMenu(false); go('settings'); }}>Settings</button>
         <button onClick=${function () { setMenu(false); props.onLogout(); }}>Log out</button>
       </div>`}
     </nav>`;
@@ -105,21 +105,26 @@
         <i></i>${props.title}<em>${open ? '˅' : '˄'}</em>
       </button>
       ${open && html`<div className="ai-body">
+        ${props.tools}
         <div className="ai-msgs" ref=${box}>
           ${props.msgs.map(function (m) {
             if (m.role === 'run') {
               return html`<div className="run" key=${m.id}>${m.steps.slice(0, m.shown).map(function (s, i) {
-                return html`<div key=${i} className=${i < m.done ? 'done' : 'work'}>${s}</div>`;
+                return html`<div key=${i} className=${m.errs && m.errs[i] ? 'fail' : i < m.done ? 'done' : 'work'}>${s}</div>`;
               })}</div>`;
             }
             if (m.role === 'quick') return html`<div className="quick" key=${m.id}>${m.content}</div>`;
+            if (m.role === 'card') return html`<div key=${m.id}>${m.content}</div>`;
+            if (m.role === 'note') return html`<div className="ai-note" key=${m.id}>${m.content}</div>`;
+            if (m.role === 'err') return html`<div className="bub ai-err" key=${m.id}>${m.content}</div>`;
             return html`<div key=${m.id} className=${'bub ' + (m.role === 'me' ? 'me' : 'ai-m')}>${m.content}</div>`;
           })}
         </div>
         <div className="ai-input">
-          <input placeholder="Ask anything" value=${text} onInput=${function (x) { setText(x.target.value); }}
-            onKeyDown=${function (x) { if (x.key === 'Enter') send(); }} />
-          <button onClick=${send} aria-label="Send">›</button>
+          <input placeholder=${props.busy ? 'Working…' : 'Ask anything'} value=${text} onInput=${function (x) { setText(x.target.value); }}
+            onKeyDown=${function (x) { if (x.key === 'Enter' && !props.busy) send(); }} />
+          ${props.busy ? html`<button onClick=${props.onStop} aria-label="Stop" title="Stop" className="stop">■</button>`
+            : html`<button onClick=${send} aria-label="Send">›</button>`}
         </div>
       </div>`}
     </div>`;
@@ -128,10 +133,14 @@
   var msgSeq = 0;
   function msg(role, content, extra) { msgSeq += 1; return Object.assign({ id: 'm' + msgSeq, role: role, content: content }, extra || {}); }
 
+  function setupNote() {
+    return html`<span>Connect an AI provider in <a href="#/settings">Settings</a> to use the assistant.</span>`;
+  }
+
   function ChatAssistant(props) {
-    var s = useState([msg('ai', props.greeting)]), msgs = s[0], setMsgs = s[1];
+    var s = useState([msg('ai', props.greeting), msg('ai', setupNote())]), msgs = s[0], setMsgs = s[1];
     function onSend(v) {
-      setMsgs(function (ms) { return ms.concat([msg('me', v), msg('ai', 'Sample reply: the AI answer will appear here.')]); });
+      setMsgs(function (ms) { return ms.concat([msg('me', v), msg('ai', setupNote())]); });
     }
     return html`<${AssistantFrame} title="AI assistant" msgs=${msgs} onSend=${onSend} />`;
   }
@@ -141,7 +150,7 @@
     var dbRef = useRef(props.db); dbRef.current = props.db;
     var pidRef = useRef(props.pid); pidRef.current = props.pid;
     var s = useState(function () {
-      return [msg('ai', 'I can read the RCM, draft sections and make changes in this narrative. You approve before anything is applied.')];
+      return [msg('ai', html`<span>Demo mode: these two examples are scripted. ${setupNote()}</span>`)];
     }), msgs = s[0], setMsgs = s[1];
     var busy = useRef(false);
 
@@ -229,6 +238,333 @@
     return html`<${AssistantFrame} title="AI agent" agent=${true} msgs=${msgs.slice(0, 1).concat(quick, msgs.slice(1))} onSend=${onSend} />`;
   }
 
+  /* ---------- Real AI agent (when a provider is set in Settings) ---------- */
+  var AI = window.ICFR_AI;
+
+  function inline(t) {
+    return t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  }
+  function mdLite(text) {
+    var out = [], list = null;
+    function close() { if (list) { out.push('</' + list + '>'); list = null; } }
+    D.esc(text || '').split('\n').forEach(function (l) {
+      var m;
+      if ((m = /^\s*[-*•]\s+(.*)$/.exec(l))) { if (list !== 'ul') { close(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + inline(m[1]) + '</li>'); }
+      else if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(l))) { if (list !== 'ol') { close(); out.push('<ol>'); list = 'ol'; } out.push('<li>' + inline(m[1]) + '</li>'); }
+      else if ((m = /^\s*#{1,4}\s+(.*)$/.exec(l))) { close(); out.push('<p><b>' + inline(m[1]) + '</b></p>'); }
+      else { close(); if (l.trim()) out.push('<p>' + inline(l) + '</p>'); }
+    });
+    close();
+    return out.join('');
+  }
+
+  var SUGGEST = {
+    dashboard: ['Summarise testing status across processes', 'Which controls have exceptions?'],
+    pn: ['Draft a Key controls section from the RCM', 'Find control gaps in this narrative'],
+    rcm: ['Review this RCM for weak control descriptions', 'Suggest testing attributes where they are missing'],
+    toc: ['Which controls still need testing?', 'Draft a testing procedure for this control'],
+    templates: ['Create a Fixed assets process', 'Which processes are not pushed to every module?'],
+    settings: ['What can you do in this portal?']
+  };
+
+  function AgentAssistant(props) {
+    var dbRef = useRef(props.db); dbRef.current = props.db;
+    var ctxRef = useRef(props.context); ctxRef.current = props.context;
+    var cfgRef = useRef(props.config); cfgRef.current = props.config;
+    var is = useState([]), items = is[0], setItems = is[1];
+    var rs = useState(false), running = rs[0], setRunning = rs[1];
+    var hist = useRef([]), abort = useRef(null), notes = useRef([]), waiters = useRef({}), proposals = useRef({}), undos = useRef({});
+
+    function nid() { msgSeq += 1; return 'a' + msgSeq; }
+    function add(it) { it.id = it.id || nid(); setItems(function (x) { return x.concat([it]); }); return it.id; }
+    function upd(id, patch) { setItems(function (x) { return x.map(function (i) { return i.id === id ? Object.assign({}, i, patch) : i; }); }); }
+    function drop(id) { setItems(function (x) { return x.filter(function (i) { return i.id !== id; }); }); }
+
+    function where() {
+      var c = ctxRef.current, db = dbRef.current, p = c.pid && findProc(db, c.pid);
+      var names = { dashboard: 'Dashboard', pn: 'Process narrative', rcm: 'RCM', toc: 'TOC', templates: 'Templates', settings: 'Settings' };
+      var s = names[c.section] || c.section;
+      if (p) s += ', process "' + p.name + '" (process_id ' + p.id + ')';
+      if (p && c.rowId) {
+        var r = (db.rcm[p.id] || { rows: [] }).rows.find(function (x) { return x.id === c.rowId; });
+        if (r) s += ', control ' + r.values.controlId + ' (row_id ' + r.id + ')';
+      }
+      return s;
+    }
+    function navigate(a) {
+      var path = a.page;
+      if (a.process_id) path += '/' + a.process_id;
+      if (a.page === 'toc' && a.process_id && a.row_id) path += '/' + a.row_id;
+      go(path);
+      return 'Opened ' + path + '.';
+    }
+    function detail(name, a) {
+      var p = a && a.process_id && findProc(dbRef.current, a.process_id);
+      return p ? ' for ' + p.name : '';
+    }
+
+    function snapshot(prop) {
+      var db = dbRef.current;
+      if (prop.newId) return { created: prop.newId };
+      var pid = prop.pid, toc = {};
+      (db.rcm[pid] || { rows: [] }).rows.forEach(function (r) { if (db.toc[r.id]) toc[r.id] = clone(db.toc[r.id]); });
+      return { pid: pid, rcm: clone(db.rcm[pid]), narrative: db.narratives[pid], toc: toc };
+    }
+    function restore(snap) {
+      props.applyChange(function (d) {
+        if (snap.created) {
+          d.processes = d.processes.filter(function (p) { return p.id !== snap.created; });
+          (d.rcm[snap.created] ? d.rcm[snap.created].rows : []).forEach(function (r) { delete d.toc[r.id]; });
+          delete d.rcm[snap.created]; delete d.narratives[snap.created];
+          return;
+        }
+        if (!d.rcm[snap.pid]) return; // the process was deleted since
+        d.rcm[snap.pid].rows.forEach(function (r) { delete d.toc[r.id]; });
+        d.rcm[snap.pid] = clone(snap.rcm);
+        d.narratives[snap.pid] = snap.narrative;
+        Object.keys(snap.toc).forEach(function (k) { d.toc[k] = clone(snap.toc[k]); });
+      });
+    }
+
+    function decide(itemId, approve) {
+      var prop = proposals.current[itemId], done = waiters.current[itemId];
+      if (!prop) return;
+      delete waiters.current[itemId];
+      if (!approve) {
+        upd(itemId, { status: 'rejected' });
+        if (done) done({ msg: 'The user rejected this proposal. Nothing was changed.' });
+        return;
+      }
+      try {
+        var snap = snapshot(prop);
+        var result = prop.apply(clone(dbRef.current)); // dry run on a copy to get the result and catch errors
+        props.applyChange(function (d) { prop.apply(d); });
+        undos.current[itemId] = snap;
+        upd(itemId, { status: 'applied' });
+        if (done) done({ msg: 'The user approved it and it was applied. ' + result });
+        else notes.current.push('The user approved and applied: ' + prop.title + '.');
+      } catch (e) {
+        upd(itemId, { status: 'failed', error: e.message });
+        if (done) done({ msg: 'Applying failed: ' + e.message, err: true });
+      }
+    }
+    function undo(itemId) {
+      var snap = undos.current[itemId];
+      if (!snap) return;
+      restore(snap);
+      delete undos.current[itemId];
+      upd(itemId, { status: 'undone' });
+      notes.current.push('The user undid this change: ' + proposals.current[itemId].title + '.');
+    }
+    function pendingIds() { return Object.keys(waiters.current); }
+
+    async function run(text) {
+      if (running) return;
+      var cfg = cfgRef.current;
+      var pre = notes.current.length ? '[Since your last turn: ' + notes.current.join(' ') + ']\n' : '';
+      notes.current = [];
+      hist.current.push({ role: 'user', text: pre + '[The user is on: ' + where() + ']\n' + text });
+      add({ type: 'me', text: text });
+      setRunning(true);
+      var ac = new AbortController(); abort.current = ac;
+      var today = new Date().toISOString().slice(0, 10);
+      try {
+        var step = 0;
+        for (; step < 20; step++) {
+          var tid = add({ type: 'thinking' });
+          var res;
+          try { res = await AI.call(cfg, AI.systemPrompt(today), hist.current, AI.tools, ac.signal); } finally { drop(tid); }
+          hist.current.push({ role: 'assistant', text: res.text, calls: res.calls, raw: res.raw, provider: res.provider });
+          if (res.text) add({ type: 'ai', text: res.text });
+          if (!res.calls.length) break;
+
+          var results = [], waits = [], stepsId = null, steps = [];
+          res.calls.forEach(function (c) {
+            var def = AI.tools.find(function (t) { return t.name === c.name; });
+            if (!def) { results.push({ id: c.id, name: c.name, content: 'Unknown tool ' + c.name, isError: true }); return; }
+            if (def.kind !== 'write') {
+              var line = { label: def.label + detail(c.name, c.args), state: 'done' };
+              try {
+                var out = def.kind === 'nav' ? navigate(c.args || {}) : AI.runRead(c.name, c.args || {}, dbRef.current);
+                results.push({ id: c.id, name: c.name, content: typeof out === 'string' ? out : JSON.stringify(out) });
+              } catch (e) {
+                line.state = 'err'; line.label += ': ' + e.message;
+                results.push({ id: c.id, name: c.name, content: 'Error: ' + e.message, isError: true });
+              }
+              steps.push(line);
+              return;
+            }
+            var prop;
+            try { prop = AI.prepare(c.name, c.args || {}, dbRef.current); } catch (e) {
+              steps.push({ label: def.label + ': ' + e.message, state: 'err' });
+              results.push({ id: c.id, name: c.name, content: 'Error: ' + e.message, isError: true });
+              return;
+            }
+            var slot = { id: c.id, name: c.name, content: '' };
+            results.push(slot);
+            var itemId = nid();
+            proposals.current[itemId] = prop;
+            waits.push(new Promise(function (resolve) {
+              waiters.current[itemId] = function (o) { slot.content = o.msg; slot.isError = !!o.err; resolve(); };
+            }));
+            add({ id: itemId, type: 'proposal', title: prop.title, lines: prop.lines || [], preview: prop.preview, warn: prop.warn, status: 'pending' });
+          });
+          if (steps.length) stepsId = add({ type: 'steps', steps: steps });
+          if (waits.length) await Promise.all(waits);
+          hist.current.push({ role: 'tool', results: results });
+          if (ac.signal.aborted) break;
+        }
+        if (step >= 20) add({ type: 'info', text: 'Stopped after 20 steps. Ask me to continue if needed.' });
+      } catch (e) {
+        if (ac.signal.aborted || e.name === 'AbortError') add({ type: 'info', text: 'Stopped.' });
+        else add({ type: 'error', text: e.message || String(e) });
+      } finally {
+        pendingIds().forEach(function (id) { decide(id, false); });
+        abort.current = null;
+        setRunning(false);
+      }
+    }
+    function stop() {
+      if (abort.current) abort.current.abort();
+      pendingIds().forEach(function (id) { decide(id, false); });
+    }
+    function reset() {
+      stop();
+      hist.current = []; notes.current = []; proposals.current = {}; undos.current = {};
+      setItems([]);
+    }
+
+    var cfg = props.config, prov = AI.PROVIDERS[cfg.provider] || {};
+    var pend = items.filter(function (i) { return i.type === 'proposal' && i.status === 'pending'; });
+    var chips = SUGGEST[props.context.section] || SUGGEST.dashboard;
+    var STATUS = { applied: 'Applied', rejected: 'Rejected', undone: 'Undone', failed: 'Failed' };
+
+    var view = [];
+    view.push(msg('ai', html`<span>Hi, I can read your narratives, RCM and testing, and propose changes. Nothing changes until you approve it.
+      <span className="ai-meta">${prov.label || cfg.provider} · ${cfg.model}</span></span>`, { id: 'hello' }));
+    if (!items.length) {
+      view.push(msg('quick', html`<span style=${{ display: 'contents' }}>${chips.map(function (c) {
+        return html`<button key=${c} onClick=${function () { run(c); }}>${c}</button>`;
+      })}</span>`, { id: 'chips' }));
+    }
+    items.forEach(function (it) {
+      if (it.type === 'me') view.push(msg('me', it.text, { id: it.id }));
+      else if (it.type === 'ai') view.push(msg('ai', html`<div className="md" dangerouslySetInnerHTML=${{ __html: mdLite(it.text) }}></div>`, { id: it.id }));
+      else if (it.type === 'thinking') view.push(msg('note', html`<span className="dots">Working</span>`, { id: it.id }));
+      else if (it.type === 'info') view.push(msg('note', it.text, { id: it.id }));
+      else if (it.type === 'error') view.push(msg('err', it.text, { id: it.id }));
+      else if (it.type === 'steps') view.push(msg('run', null, { id: it.id, steps: it.steps.map(function (s) { return s.label; }), shown: it.steps.length, done: it.steps.length, errs: it.steps.map(function (s) { return s.state === 'err'; }) }));
+      else if (it.type === 'proposal') {
+        view.push(msg('card', html`<div className=${'prop ' + it.status}>
+          <div className="prop-h"><b>${it.title}</b>${it.status !== 'pending' && html`<span className=${'pill ' + (it.status === 'applied' ? 'ok' : it.status === 'failed' ? 'r' : 'n')}>${STATUS[it.status]}</span>`}</div>
+          ${it.lines.length ? html`<ul>${it.lines.map(function (l, i) { return html`<li key=${i}>${l}</li>`; })}</ul>` : null}
+          ${it.preview && html`<div className="prop-prev" dangerouslySetInnerHTML=${{ __html: it.preview }}></div>`}
+          ${it.warn && html`<div className="prop-warn">${it.warn}</div>`}
+          ${it.error && html`<div className="prop-warn">${it.error}</div>`}
+          ${it.status === 'pending' && html`<div><button className="ab p" onClick=${function () { decide(it.id, true); }}>Approve</button>
+            <button className="ab s" onClick=${function () { decide(it.id, false); }}>Reject</button></div>`}
+          ${it.status === 'applied' && undos.current[it.id] && html`<div><button className="ab s" onClick=${function () { undo(it.id); }}>Undo</button></div>`}
+        </div>`, { id: it.id }));
+      }
+    });
+    if (pend.length > 1) {
+      view.push(msg('note', html`<span>${pend.length} changes waiting. <button className="ab p" onClick=${function () { pend.forEach(function (p) { decide(p.id, true); }); }}>Approve all</button>
+        <button className="ab s" onClick=${function () { pend.forEach(function (p) { decide(p.id, false); }); }}>Reject all</button></span>`, { id: 'all' }));
+    }
+
+    return html`<${AssistantFrame} title="AI agent" agent=${true} msgs=${view} onSend=${run} busy=${running} onStop=${stop}
+      tools=${html`<span className="ai-tools"><button onClick=${reset} title="Start a new conversation">New chat</button><a href="#/settings">Settings</a></span>`} />`;
+  }
+
+  /* ---------- Settings ---------- */
+  function Settings(props) {
+    var c = props.config || {};
+    var ps = useState(c.provider || 'anthropic'), provider = ps[0], setProvider = ps[1];
+    var ks = useState(c.apiKey || ''), apiKey = ks[0], setKey = ks[1];
+    var ms = useState(c.model || AI.PROVIDERS[c.provider || 'anthropic'].model), model = ms[0], setModel = ms[1];
+    var bs = useState(c.baseUrl || ''), baseUrl = bs[0], setBase = bs[1];
+    var ss = useState(false), showKey = ss[0], setShow = ss[1];
+    var st = useState(null), status = st[0], setStatus = st[1];
+    var ts = useState(false), testing = ts[0], setTesting = ts[1];
+    var P = AI.PROVIDERS[provider];
+
+    function cfg() { return { provider: provider, apiKey: apiKey.trim(), model: model.trim(), baseUrl: baseUrl.trim() }; }
+    function pick(v) {
+      var old = AI.PROVIDERS[provider];
+      if (!model || model === old.model || old.models.indexOf(model) >= 0) setModel(AI.PROVIDERS[v].model);
+      setProvider(v); setStatus(null);
+    }
+    function missing(x) {
+      if (!x.apiKey) return 'Enter the API key.';
+      if (!x.model) return 'Enter the model name.';
+      if (x.provider === 'compatible' && !x.baseUrl) return 'Enter the base URL of the service.';
+      return '';
+    }
+    function save() {
+      var x = cfg(), m = missing(x);
+      if (m) { setStatus({ err: true, text: m }); return; }
+      var ok = AI.saveConfig(x);
+      props.onSave(x);
+      setStatus({ text: ok ? 'Saved. The AI assistant now uses ' + P.label + ' (' + x.model + ').' : 'Saved for this visit only: this browser blocks local storage.' });
+    }
+    function test() {
+      var x = cfg(), m = missing(x);
+      if (m) { setStatus({ err: true, text: m }); return; }
+      setTesting(true); setStatus({ text: 'Testing…' });
+      AI.testConnection(x).then(function (r) {
+        setStatus({ text: 'Connected. The model replied: "' + String(r.text || '').slice(0, 80) + '"' });
+      }).catch(function (e) {
+        setStatus({ err: true, text: (e.message || String(e)) + (e instanceof TypeError ? ' (The browser could not reach the service. Check the base URL, and that the service allows calls from a browser.)' : '') });
+      }).then(function () { setTesting(false); });
+    }
+    function remove() {
+      AI.saveConfig(null); props.onSave(null);
+      setKey(''); setStatus({ text: 'Removed. The AI assistant is off until you add a provider again.' });
+    }
+
+    var basePh = { anthropic: P.base + ' (default)', openai: P.base + ' (default)', gemini: P.base + ' (default)', compatible: 'e.g. https://openrouter.ai/api/v1' }[provider];
+    var modelPh = { anthropic: 'claude-opus-5-5', openai: 'Model name from your OpenAI account', gemini: 'Gemini model name, e.g. from Google AI Studio', compatible: 'Model name used by that service' }[provider];
+
+    return html`<div className="settings">
+      <div className="top"><h1>Settings</h1></div>
+      <div className="card form-card">
+        <span className="card-title">AI assistant</span>
+        <div className="mut" style=${{ margin: '2px 0 12px' }}>Choose the AI provider the assistant uses and paste your API key.</div>
+        <label className="fld"><span>Provider</span>
+          <select value=${provider} onChange=${function (x) { pick(x.target.value); }}>
+            ${Object.keys(AI.PROVIDERS).map(function (k) { return html`<option key=${k} value=${k}>${AI.PROVIDERS[k].label}</option>`; })}
+          </select></label>
+        <label className="fld"><span>API key</span>
+          <span className="key-row"><input type=${showKey ? 'text' : 'password'} value=${apiKey} autoComplete="off" spellCheck=${false} placeholder="Paste your API key"
+            onInput=${function (x) { setKey(x.target.value); setStatus(null); }} />
+          <button className="btn o" type="button" onClick=${function () { setShow(!showKey); }}>${showKey ? 'Hide' : 'Show'}</button></span></label>
+        <label className="fld"><span>Model</span>
+          <input list="model-list" value=${model} placeholder=${modelPh} onInput=${function (x) { setModel(x.target.value); setStatus(null); }} />
+          <datalist id="model-list">${P.models.map(function (m) { return html`<option key=${m} value=${m}></option>`; })}</datalist></label>
+        <label className="fld"><span>Base URL ${provider === 'compatible' ? '' : '(optional)'}</span>
+          <input value=${baseUrl} placeholder=${basePh} onInput=${function (x) { setBase(x.target.value); setStatus(null); }} /></label>
+        <div className="foot" style=${{ justifyContent: 'flex-start' }}>
+          <button className="btn" onClick=${save}>Save</button>
+          <button className="btn o" onClick=${test} disabled=${testing}>Test connection</button>
+          ${props.config && html`<button className="btn o" onClick=${remove}>Remove</button>`}
+        </div>
+        ${status && html`<div className=${'note' + (status.err ? ' err' : '')}>${status.text}</div>`}
+        <p className="mut" style=${{ marginTop: '14px' }}>The key is stored only in this browser and is sent straight to the provider, never to the portal. Anyone who uses this browser profile can use it. Use a key with a spending limit.</p>
+      </div>
+    </div>`;
+  }
+
+  /* ---------- Export buttons ---------- */
+  function useExport() {
+    var s = useState(''), state = s[0], setState = s[1];
+    function run(fn) {
+      if (state === 'busy') return;
+      setState('busy');
+      Promise.resolve().then(fn).then(function () { setState(''); }).catch(function (e) { setState('Export failed: ' + (e.message || e)); });
+    }
+    return [state, run];
+  }
+
   /* ---------- Dashboard ---------- */
   function Dashboard(props) {
     var db = props.db, total = 0, tested = 0, issues = 0;
@@ -297,6 +633,7 @@
 
   function NarrativeDoc(props) {
     var p = props.proc, ed = useRef(null), range = useRef(null);
+    var ex = useExport(), exState = ex[0], runExport = ex[1];
     useEffect(function () { ed.current.innerHTML = props.html || ''; range.current = null; }, [props.docKey]);
     useEffect(function () {
       function track() {
@@ -318,7 +655,10 @@
       return html`<button className="tb" title=${title} style=${style} onMouseDown=${keep} onClick=${function () { exec(cmd); }}>${label}</button>`;
     }
     return html`<div className="doc-wrap">
-      <div className="bc"><a href="#/pn">‹ Process narrative</a> / ${p.name}</div>
+      <div className="doc-head"><div className="bc"><a href="#/pn">‹ Process narrative</a> / ${p.name}</div>
+        <span className="exp">${exState && exState !== 'busy' && html`<span className="exp-err">${exState}</span>`}
+        <button className="btn o" disabled=${exState === 'busy'} onClick=${function () { runExport(function () { return window.ICFR_EXPORT.narrativeDocx(p, ed.current ? ed.current.innerHTML : props.html); }); }}>${exState === 'busy' ? 'Exporting…' : 'Export to Word'}</button></span>
+      </div>
       <div className="toolbar">
         <select title="Block style" defaultValue="<p>" onChange=${function (x) { exec('formatBlock', x.target.value); }}>
           <option value="<p>">Normal</option><option value="<h1>">Heading 1</option><option value="<h2>">Heading 2</option>
@@ -364,6 +704,7 @@
     var os = useState(''), owner = os[0], setOwner = os[1];
     var ks = useState(''), keyF = ks[0], setKeyF = ks[1];
     var fc = useRef(null), wrap = useRef(null);
+    var ex = useExport(), exState = ex[0], runExport = ex[1];
 
     useEffect(function () {
       if (!fc.current || !wrap.current) return;
@@ -446,8 +787,12 @@
     return html`<div ref=${wrap}>
       <div className="bc"><a href="#/rcm">‹ RCM</a> / ${p.name}</div>
       <div className="top"><h1>${p.name}</h1>
-        <div className="top-actions"><button className="btn o" onClick=${addColumn}>+ Column</button><button className="btn" onClick=${addRow}>+ Add control</button></div>
+        <div className="top-actions">
+          <button className="btn o" disabled=${exState === 'busy'} onClick=${function () { runExport(function () { return window.ICFR_EXPORT.rcmXlsx(p, rcm); }); }}>Export Excel</button>
+          <button className="btn o" disabled=${exState === 'busy'} onClick=${function () { runExport(function () { return window.ICFR_EXPORT.rcmDocx(p, rcm); }); }}>Export Word</button>
+          <button className="btn o" onClick=${addColumn}>+ Column</button><button className="btn" onClick=${addRow}>+ Add control</button></div>
       </div>
+      ${exState && exState !== 'busy' && html`<div className="exp-err">${exState}</div>`}
       <div className="filters">
         <input placeholder="Search risks and controls" value=${q} onInput=${function (x) { setQ(x.target.value); }} />
         <select value=${owner} onChange=${function (x) { setOwner(x.target.value); }} aria-label="Owner">
@@ -656,6 +1001,7 @@
     var fs = useState(''), flash = fs[0], setFlash = fs[1];
     var vs = useState(0), docVer = vs[0], setDocVer = vs[1];
     var dbRef = useRef(db); dbRef.current = db;
+    var as = useState(function () { return AI.loadConfig(); }), aiConfig = as[0], setAiConfig = as[1];
 
     function mutate(fn) { setDb(function (d) { var n = clone(d); fn(n); return n; }); }
 
@@ -677,6 +1023,7 @@
 
     function logout() { store(false, 'icfr.signedIn', '0'); setSignedIn(false); go(''); }
 
+    function applyChange(fn) { mutate(fn); setDocVer(function (x) { return x + 1; }); }
     function setNarrative(pid, h) {
       mutate(function (d) { d.narratives[pid] = h; });
       setDocVer(function (x) { return x + 1; });
@@ -770,6 +1117,9 @@
         ? html`<${TemplateNew} createProcess=${createProcess} />`
         : html`<${TemplateList} db=${db} flash=${flash} deleteProcess=${deleteProcess} />`;
       assistant = html`<${ChatAssistant} greeting="Hi, I can help set up a new process template and choose what it creates." />`;
+    } else if (section === 'settings') {
+      page = html`<${Settings} config=${aiConfig} onSave=${setAiConfig} />`;
+      assistant = html`<${ChatAssistant} greeting="Hi, I can help with controls, narratives and testing." />`;
     } else {
       page = html`<${Dashboard} db=${db} />`;
       assistant = html`<${ChatAssistant} greeting="Hi, I can help with controls, narratives and testing. What do you need?" />`;
@@ -778,7 +1128,10 @@
     return html`<div className=${'app' + (collapsed ? ' collapsed' : '')}>
       <${Sidebar} section=${section} collapsed=${collapsed} setCollapsed=${setCollapsed} onLogout=${logout} />
       <main className="main">${page}</main>
-      ${e(React.Fragment, { key: section }, assistant)}
+      ${AI.ready(aiConfig)
+        ? html`<${AgentAssistant} config=${aiConfig} db=${db} applyChange=${applyChange}
+            context=${{ section: section, pid: route[1] && route[1] !== 'new' ? route[1] : null, rowId: route[2] || null }} />`
+        : e(React.Fragment, { key: section }, assistant)}
     </div>`;
   }
 
